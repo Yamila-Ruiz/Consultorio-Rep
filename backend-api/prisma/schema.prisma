@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model cita {
+  idCita             Int                @id @default(autoincrement())
+  codigo             String             @unique(map: "codigo") @db.VarChar(10)
+  fecha              DateTime           @db.Date
+  hora               DateTime           @db.Time(0)
+  estado             String             @db.VarChar(10)
+  esPrimeraSesion    Int                @db.TinyInt
+  multaGenerada      Int                @db.TinyInt
+  idPaciente         Int
+  idSlot             Int
+  idServicio         Int
+  servicio           servicio           @relation(fields: [idServicio], references: [idServicio], onUpdate: Restrict, map: "FK_CIta_Servicio")
+  paciente           paciente           @relation(fields: [idPaciente], references: [idPaciente], onUpdate: Restrict, map: "FK_Cita_Paciente")
+  slotdisponibilidad slotdisponibilidad @relation(fields: [idSlot], references: [idSlot], onUpdate: Restrict, map: "FK_Cita_Slot")
+  pago               pago[]
+
+  @@index([idServicio], map: "FK_CIta_Servicio")
+  @@index([idPaciente], map: "FK_Cita_Paciente")
+  @@index([idSlot], map: "FK_Cita_Slot")
+}
+
+model paciente {
+  idPaciente         Int       @id @default(autoincrement())
+  codigo             String    @unique(map: "codigo") @db.VarChar(10)
+  nombre             String    @db.VarChar(30)
+  aPaterno           String    @db.VarChar(30)
+  aMaterno           String    @db.VarChar(30)
+  edad               Int
+  contactoTelefonico String    @db.VarChar(10)
+  nombreFacturacion  String    @db.VarChar(50)
+  correoFacturacion  String    @db.VarChar(60)
+  fechaRegistro      DateTime  @db.Date
+  idTerapeuta        Int
+  cita               cita[]
+  terapeuta          terapeuta @relation(fields: [idTerapeuta], references: [idTerapeuta], onUpdate: Restrict, map: "FK_Paciente_Terapeuta")
+
+  @@index([idTerapeuta], map: "FK_Paciente_Terapeuta")
+}
+
+model pago {
+  idPago      Int      @id @default(autoincrement())
+  codigo      String   @unique(map: "codigo") @db.VarChar(10)
+  fecha       DateTime @db.Date
+  metodo      String   @db.VarChar(30)
+  facturacion Int      @db.TinyInt
+  idCita      Int
+  cita        cita     @relation(fields: [idCita], references: [idCita], onUpdate: Restrict, map: "FK_Pago_Cita")
+
+  @@index([idCita], map: "FK_Pago_Cita")
+}
+
+model recepcionista {
+  idRecepcion        Int     @id @default(autoincrement())
+  codigo             String  @unique(map: "codigo") @db.VarChar(10)
+  nombreCompleto     String  @db.VarChar(60)
+  contactoTelefonico String  @db.VarChar(10)
+  idUsuario          Int
+  usuario            usuario @relation(fields: [idUsuario], references: [idUsuario], onUpdate: Restrict, map: "FK_Recepcion_Usuario")
+
+  @@index([idUsuario], map: "FK_Recepcion_Usuario")
+}
+
+model servicio {
+  idServicio  Int    @id @default(autoincrement())
+  codigo      String @unique(map: "codigo") @db.VarChar(10)
+  nombre      String @db.VarChar(30)
+  descripcion String @db.VarChar(50)
+  activo      Int    @db.TinyInt
+  cita        cita[]
+}
+
+model slotdisponibilidad {
+  idSlot      Int       @id @default(autoincrement())
+  inicio      DateTime  @db.Time(0)
+  fin         DateTime  @db.Time(0)
+  fecha       DateTime  @db.Date
+  estado      Int       @db.TinyInt
+  idTerapeuta Int
+  cita        cita[]
+  terapeuta   terapeuta @relation(fields: [idTerapeuta], references: [idTerapeuta], onUpdate: Restrict, map: "FK_Slot_Terapeuta")
+
+  @@index([idTerapeuta], map: "FK_Slot_Terapeuta")
+}
+
+model terapeuta {
+  idTerapeuta        Int                  @id @default(autoincrement())
+  codigo             String               @unique(map: "codigo") @db.VarChar(10)
+  nombreCompleto     String               @db.Text
+  contactoTelefonico String               @db.VarChar(10)
+  especialidad       String               @db.VarChar(30)
+  idUsuario          Int
+  paciente           paciente[]
+  slotdisponibilidad slotdisponibilidad[]
+  usuario            usuario              @relation(fields: [idUsuario], references: [idUsuario], onUpdate: Restrict, map: "FK_Terapeuta_Usuario")
+
+  @@index([idUsuario], map: "FK_Terapeuta_Usuario")
+}
+
+model usuario {
+  idUsuario     Int             @id @default(autoincrement())
+  codigo        String          @unique(map: "codigo") @db.VarChar(10)
+  nombreUsuario String          @db.VarChar(20)
+  contrasena    String          @db.VarChar(30)
+  recepcionista recepcionista[]
+  terapeuta     terapeuta[]
+}

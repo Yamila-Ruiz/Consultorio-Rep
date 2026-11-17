@@ -1,12 +1,25 @@
-import React from 'react';
-import GestionConsultorio from './components/GestionConsultorio';
+import { RouterProvider } from 'react-router-dom';
 
-function App() {
+// routing
+import router from 'routes';
+
+// project imports
+import NavigationScroll from 'layout/NavigationScroll';
+
+import ThemeCustomization from 'themes';
+
+// auth provider
+
+// ==============================|| APP ||============================== //
+
+export default function App() {
   return (
-      <div>
-        <GestionConsultorio />
-      </div>
+    <ThemeCustomization>
+      <NavigationScroll>
+        <>
+          <RouterProvider router={router} />
+        </>
+      </NavigationScroll>
+    </ThemeCustomization>
   );
 }
-
-export default App;

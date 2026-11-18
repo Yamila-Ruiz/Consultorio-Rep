@@ -19,7 +19,6 @@ export const getSlots = async (req: Request, res: Response) => {
                 terapeuta: {
                     select: {
                         idTerapeuta: true,
-                        codigo: true,
                         nombreCompleto: true,
                         especialidad: true
                     }
@@ -54,8 +53,9 @@ export const createSlot = async (req: Request, res: Response) => {
         return;
     }
 
-    // 2. Validar que no sea una fecha pasada
-    const hoyStr = new Date().toISOString().split('T')[0];
+    // 2. Validar que no sea una fecha pasada (usando fecha local)
+    const ahora = new Date();
+    const hoyStr = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
     if (fecha < hoyStr) {
         res.status(400).json({ error: 'Horario inválido: no puedes registrar disponibilidad en una fecha pasada' });
         return;

@@ -10,7 +10,6 @@ datasource db {
 
 model cita {
   idCita             Int                @id @default(autoincrement())
-  codigo             String             @unique(map: "codigo") @db.VarChar(10)
   fecha              DateTime           @db.Date
   hora               DateTime           @db.Time(0)
   estado             String             @db.VarChar(10)
@@ -31,7 +30,6 @@ model cita {
 
 model paciente {
   idPaciente         Int       @id @default(autoincrement())
-  codigo             String    @unique(map: "codigo") @db.VarChar(10)
   nombre             String    @db.VarChar(30)
   aPaterno           String    @db.VarChar(30)
   aMaterno           String    @db.VarChar(30)
@@ -49,7 +47,6 @@ model paciente {
 
 model pago {
   idPago      Int      @id @default(autoincrement())
-  codigo      String   @unique(map: "codigo") @db.VarChar(10)
   fecha       DateTime @db.Date
   metodo      String   @db.VarChar(30)
   facturacion Int      @db.TinyInt
@@ -61,7 +58,6 @@ model pago {
 
 model recepcionista {
   idRecepcion        Int     @id @default(autoincrement())
-  codigo             String  @unique(map: "codigo") @db.VarChar(10)
   nombreCompleto     String  @db.VarChar(60)
   contactoTelefonico String  @db.VarChar(10)
   idUsuario          Int
@@ -72,7 +68,6 @@ model recepcionista {
 
 model servicio {
   idServicio  Int    @id @default(autoincrement())
-  codigo      String @unique(map: "codigo") @db.VarChar(10)
   nombre      String @db.VarChar(30)
   descripcion String @db.VarChar(50)
   activo      Int    @db.TinyInt
@@ -94,7 +89,6 @@ model slotdisponibilidad {
 
 model terapeuta {
   idTerapeuta        Int                  @id @default(autoincrement())
-  codigo             String               @unique(map: "codigo") @db.VarChar(10)
   nombreCompleto     String               @db.Text
   contactoTelefonico String               @db.VarChar(10)
   especialidad       String               @db.VarChar(30)
@@ -108,7 +102,6 @@ model terapeuta {
 
 model usuario {
   idUsuario     Int             @id @default(autoincrement())
-  codigo        String          @unique(map: "codigo") @db.VarChar(10)
   nombreUsuario String          @db.VarChar(20)
   contrasena    String          @db.VarChar(30)
   recepcionista recepcionista[]

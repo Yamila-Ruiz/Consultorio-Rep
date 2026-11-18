@@ -1,14 +1,12 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 
-// Convierte "HH:mm" o "HH:mm:ss" a un objeto Date válido para columnas TIME de MySQL
 const parseTime = (timeValue: string): Date => {
     if (timeValue.includes('T')) return new Date(timeValue);
     const normalized = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
     return new Date(`1970-01-01T${normalized}Z`);
 };
 
-// Obtener todas las citas con datos de paciente, servicio, slot/terapeuta y pagos
 export const getCitas = async (req: Request, res: Response) => {
     try {
         const citas = await prisma.cita.findMany({
@@ -16,7 +14,6 @@ export const getCitas = async (req: Request, res: Response) => {
                 paciente: {
                     select: {
                         idPaciente: true,
-                        codigo: true,
                         nombre: true,
                         aPaterno: true,
                         aMaterno: true,
@@ -26,7 +23,6 @@ export const getCitas = async (req: Request, res: Response) => {
                 servicio: {
                     select: {
                         idServicio: true,
-                        codigo: true,
                         nombre: true
                     }
                 },
@@ -55,10 +51,8 @@ export const getCitas = async (req: Request, res: Response) => {
     }
 };
 
-// Agendar una nueva cita y marcar el slot como ocupado (estado: 0)
 export const createCita = async (req: Request, res: Response) => {
     const {
-        codigo,
         fecha,
         hora,
         estado,
@@ -78,7 +72,6 @@ export const createCita = async (req: Request, res: Response) => {
         const slotIdNumber = Number(idSlot);
         const pacienteIdNumber = Number(idPaciente);
 
-        // 1. Verificar que el slot exista y esté disponible (estado === 1)
         const slot = await prisma.slotdisponibilidad.findUnique({
             where: { idSlot: slotIdNumber }
         });
@@ -93,9 +86,10 @@ export const createCita = async (req: Request, res: Response) => {
             return;
         }
 
-        // 2. Verificar que la fecha del horario no sea pasada
         const fechaSlotStr = slot.fecha.toISOString().split('T')[0];
-        const hoyStr = new Date().toISOString().split('T')[0];
+        const ahora = new Date();
+        const hoyStr = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
+
         if (fechaSlotStr < hoyStr) {
             res.status(400).json({ error: 'Horario inválido: no se pueden agendar citas en fechas pasadas' });
             return;
@@ -104,7 +98,6 @@ export const createCita = async (req: Request, res: Response) => {
         const fechaCita = fecha ? new Date(fecha) : slot.fecha;
         const horaCita = hora ? parseTime(hora) : slot.inicio;
 
-        // 3. Verificar que el paciente no tenga ya una cita activa en esa misma fecha y hora
         const citaDuplicadaPaciente = await prisma.cita.findFirst({
             where: {
                 idPaciente: pacienteIdNumber,
@@ -119,12 +112,9 @@ export const createCita = async (req: Request, res: Response) => {
             return;
         }
 
-        const codigoFinal = codigo || `CIT-${Math.floor(10000 + Math.random() * 90000)}`;
-
         const nuevaCita = await prisma.$transaction(async (tx) => {
             const citaCreada = await tx.cita.create({
                 data: {
-                    codigo: codigoFinal,
                     fecha: fechaCita,
                     hora: horaCita,
                     estado: (estado || 'Agendada').slice(0, 10),
@@ -151,7 +141,6 @@ export const createCita = async (req: Request, res: Response) => {
     }
 };
 
-// Actualizar una cita existente (estado, fecha, hora, multa, etc.)
 export const updateCita = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const {
@@ -167,26 +156,61 @@ export const updateCita = async (req: Request, res: Response) => {
 
     try {
         const citaActualizada = await prisma.$transaction(async (tx) => {
+            // 1. Consultamos cómo estaba la cita antes de editarla
             const citaPrevia = await tx.cita.findUnique({ where: { idCita: id } });
 
+            if (!citaPrevia) {
+                throw new Error('NO_ENCONTRADA');
+            }
+
+            let nuevaFecha = fecha !== undefined ? new Date(fecha) : undefined;
+            let nuevaHora = hora !== undefined ? parseTime(hora) : undefined;
+            const nuevoSlotId = idSlot !== undefined ? Number(idSlot) : undefined;
+
+            // 2. Si el usuario eligió un horario distinto al que ya tenía
+            if (nuevoSlotId && nuevoSlotId !== citaPrevia.idSlot) {
+                const slotNuevo = await tx.slotdisponibilidad.findUnique({
+                    where: { idSlot: nuevoSlotId }
+                });
+
+                if (!slotNuevo || slotNuevo.estado !== 1) {
+                    throw new Error('SLOT_OCUPADO');
+                }
+
+                // Sincronizamos fecha y hora con las del nuevo horario elegido
+                nuevaFecha = slotNuevo.fecha;
+                nuevaHora = slotNuevo.inicio;
+
+                // Liberamos el horario viejo y ocupamos el nuevo
+                await tx.slotdisponibilidad.update({
+                    where: { idSlot: citaPrevia.idSlot },
+                    data: { estado: 1 }
+                });
+                await tx.slotdisponibilidad.update({
+                    where: { idSlot: nuevoSlotId },
+                    data: { estado: 0 }
+                });
+            }
+
+            // 3. Actualizamos los datos de la cita
             const actualizada = await tx.cita.update({
                 where: { idCita: id },
                 data: {
-                    ...(fecha !== undefined && { fecha: new Date(fecha) }),
-                    ...(hora !== undefined && { hora: parseTime(hora) }),
+                    ...(nuevaFecha !== undefined && { fecha: nuevaFecha }),
+                    ...(nuevaHora !== undefined && { hora: nuevaHora }),
                     ...(estado !== undefined && { estado: String(estado).slice(0, 10) }),
                     ...(esPrimeraSesion !== undefined && { esPrimeraSesion: esPrimeraSesion ? 1 : 0 }),
                     ...(multaGenerada !== undefined && { multaGenerada: multaGenerada ? 1 : 0 }),
                     ...(idPaciente !== undefined && { idPaciente: Number(idPaciente) }),
-                    ...(idSlot !== undefined && { idSlot: Number(idSlot) }),
+                    ...(nuevoSlotId !== undefined && { idSlot: nuevoSlotId }),
                     ...(idServicio !== undefined && { idServicio: Number(idServicio) })
                 }
             });
 
-            // Si la cita se marca como Cancelada, libera el horario automáticamente
-            if (estado === 'Cancelada' && citaPrevia) {
+            // 4. Si la cita se canceló, liberamos el horario que tenía asignado
+            if (estado === 'Cancelada' && citaPrevia.estado !== 'Cancelada') {
                 await tx.slotdisponibilidad.update({
-                    where: { idSlot: citaPrevia.idSlot },
+                    where: { idSlot: actualizada.idSlot },
                     data: { estado: 1 }
                 });
             }
@@ -195,13 +219,22 @@ export const updateCita = async (req: Request, res: Response) => {
         });
 
         res.json(citaActualizada);
-    } catch (error) {
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            if (error.message === 'NO_ENCONTRADA') {
+                res.status(404).json({ error: 'La cita no existe' });
+                return;
+            }
+            if (error.message === 'SLOT_OCUPADO') {
+                res.status(409).json({ error: 'El nuevo horario seleccionado ya está ocupado' });
+                return;
+            }
+        }
         console.error('Error al actualizar cita:', error);
         res.status(500).json({ error: 'Error al actualizar la cita' });
     }
 };
 
-// Eliminar una cita y liberar nuevamente su slot
 export const deleteCita = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
 

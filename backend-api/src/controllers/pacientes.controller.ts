@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 
-// Obtener todos los pacientes con los datos básicos de su terapeuta
 export const getPacientes = async (req: Request, res: Response) => {
     try {
         const pacientes = await prisma.paciente.findMany({
@@ -9,7 +8,6 @@ export const getPacientes = async (req: Request, res: Response) => {
                 terapeuta: {
                     select: {
                         idTerapeuta: true,
-                        codigo: true,
                         nombreCompleto: true,
                         especialidad: true
                     }
@@ -23,10 +21,8 @@ export const getPacientes = async (req: Request, res: Response) => {
     }
 };
 
-// Registrar un nuevo paciente
 export const createPaciente = async (req: Request, res: Response) => {
     const {
-        codigo,
         nombre,
         aPaterno,
         aMaterno,
@@ -38,19 +34,21 @@ export const createPaciente = async (req: Request, res: Response) => {
         idTerapeuta
     } = req.body;
 
-    try {
-        const codigoFinal = codigo || `PAC-${Math.floor(10000 + Math.random() * 90000)}`;
+    if (!nombre?.trim() || !aPaterno?.trim() || !idTerapeuta) {
+        res.status(400).json({ error: 'Nombre, apellido paterno y terapeuta asignado son obligatorios' });
+        return;
+    }
 
+    try {
         const nuevoPaciente = await prisma.paciente.create({
             data: {
-                codigo: codigoFinal,
-                nombre,
-                aPaterno,
-                aMaterno,
-                edad: Number(edad),
-                contactoTelefonico,
-                nombreFacturacion: nombreFacturacion || `${nombre} ${aPaterno}`,
-                correoFacturacion: correoFacturacion || '',
+                nombre: String(nombre).trim(),
+                aPaterno: String(aPaterno).trim(),
+                aMaterno: aMaterno ? String(aMaterno).trim() : '',
+                edad: edad !== undefined && edad !== '' ? Number(edad) : 0,
+                contactoTelefonico: String(contactoTelefonico || '').trim().slice(0, 10),
+                nombreFacturacion: nombreFacturacion?.trim() || `${nombre.trim()} ${aPaterno.trim()}`,
+                correoFacturacion: correoFacturacion ? String(correoFacturacion).trim() : '',
                 fechaRegistro: fechaRegistro ? new Date(fechaRegistro) : new Date(),
                 idTerapeuta: Number(idTerapeuta)
             }
@@ -62,7 +60,6 @@ export const createPaciente = async (req: Request, res: Response) => {
     }
 };
 
-// Actualizar un paciente existente
 export const updatePaciente = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const {
@@ -80,14 +77,14 @@ export const updatePaciente = async (req: Request, res: Response) => {
         const pacienteActualizado = await prisma.paciente.update({
             where: { idPaciente: id },
             data: {
-                nombre,
-                aPaterno,
-                aMaterno,
-                edad: Number(edad),
-                contactoTelefonico,
-                nombreFacturacion,
-                correoFacturacion,
-                ...(idTerapeuta && { idTerapeuta: Number(idTerapeuta) })
+                ...(nombre !== undefined && { nombre: String(nombre).trim() }),
+                ...(aPaterno !== undefined && { aPaterno: String(aPaterno).trim() }),
+                ...(aMaterno !== undefined && { aMaterno: String(aMaterno).trim() }),
+                ...(edad !== undefined && edad !== '' && { edad: Number(edad) }),
+                ...(contactoTelefonico !== undefined && { contactoTelefonico: String(contactoTelefonico).trim().slice(0, 10) }),
+                ...(nombreFacturacion !== undefined && { nombreFacturacion: String(nombreFacturacion).trim() }),
+                ...(correoFacturacion !== undefined && { correoFacturacion: String(correoFacturacion).trim() }),
+                ...(idTerapeuta !== undefined && { idTerapeuta: Number(idTerapeuta) })
             }
         });
         res.json(pacienteActualizado);
@@ -96,8 +93,7 @@ export const updatePaciente = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Error al actualizar el paciente' });
     }
 };
-
-// Eliminar un paciente
+//Eliminar paciente
 export const deletePaciente = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
 

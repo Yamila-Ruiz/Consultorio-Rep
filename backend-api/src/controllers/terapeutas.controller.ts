@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 
-// Obtener todos los terapeutas
 export const getTerapeutas = async (req: Request, res: Response) => {
     try {
         const terapeutas = await prisma.terapeuta.findMany({
@@ -9,7 +8,6 @@ export const getTerapeutas = async (req: Request, res: Response) => {
                 usuario: {
                     select: {
                         idUsuario: true,
-                        codigo: true,
                         nombreUsuario: true
                     }
                 }
@@ -21,22 +19,22 @@ export const getTerapeutas = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Error al obtener la lista de terapeutas' });
     }
 };
-
-// Crear un nuevo terapeuta
+//Validaciones de longitud y espacios vacios
 export const createTerapeuta = async (req: Request, res: Response) => {
-    const { codigo, nombreCompleto, contactoTelefonico, especialidad, idUsuario } = req.body;
+    const { nombreCompleto, contactoTelefonico, especialidad, idUsuario } = req.body;
+
+    if (!idUsuario || !nombreCompleto?.trim() || !especialidad?.trim()) {
+        res.status(400).json({ error: 'Debes completar nombre, especialidad e idUsuario del terapeuta' });
+        return;
+    }
 
     try {
-        // Genera un código de máximo 10 caracteres si no viene desde el frontend
-        const codigoFinal = codigo || `TER-${Math.floor(10000 + Math.random() * 90000)}`;
-
         const nuevoTerapeuta = await prisma.terapeuta.create({
             data: {
-                codigo: codigoFinal,
-                nombreCompleto,
-                contactoTelefonico,
-                especialidad,
-                idUsuario: Number(idUsuario) || 1
+                nombreCompleto: String(nombreCompleto).trim(),
+                contactoTelefonico: String(contactoTelefonico || '').trim().slice(0, 10),
+                especialidad: String(especialidad).trim().slice(0, 30),
+                idUsuario: Number(idUsuario)
             }
         });
         res.status(201).json(nuevoTerapeuta);
@@ -45,8 +43,7 @@ export const createTerapeuta = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Error al registrar el terapeuta' });
     }
 };
-
-// Actualizar un terapeuta existente
+//Actualizar terapeuta
 export const updateTerapeuta = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const { nombreCompleto, contactoTelefonico, especialidad, idUsuario } = req.body;
@@ -55,10 +52,10 @@ export const updateTerapeuta = async (req: Request, res: Response) => {
         const terapeutaActualizado = await prisma.terapeuta.update({
             where: { idTerapeuta: id },
             data: {
-                nombreCompleto,
-                contactoTelefonico,
-                especialidad,
-                ...(idUsuario && { idUsuario: Number(idUsuario) })
+                ...(nombreCompleto !== undefined && { nombreCompleto: String(nombreCompleto).trim() }),
+                ...(contactoTelefonico !== undefined && { contactoTelefonico: String(contactoTelefonico).trim().slice(0, 10) }),
+                ...(especialidad !== undefined && { especialidad: String(especialidad).trim().slice(0, 30) }),
+                ...(idUsuario !== undefined && { idUsuario: Number(idUsuario) })
             }
         });
         res.json(terapeutaActualizado);
@@ -67,8 +64,7 @@ export const updateTerapeuta = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Error al actualizar el terapeuta' });
     }
 };
-
-// Eliminar un terapeuta
+//Eliminar terapeuta
 export const deleteTerapeuta = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
 

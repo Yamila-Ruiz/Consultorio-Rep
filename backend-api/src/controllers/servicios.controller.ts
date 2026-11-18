@@ -14,16 +14,18 @@ export const getServicios = async (req: Request, res: Response) => {
 
 // Crear un nuevo servicio
 export const createServicio = async (req: Request, res: Response) => {
-    const { codigo, nombre, descripcion, activo } = req.body;
+    const { nombre, descripcion, activo } = req.body;
+
+    if (!nombre?.trim()) {
+        res.status(400).json({ error: 'El nombre del servicio es obligatorio' });
+        return;
+    }
 
     try {
-        const codigoFinal = codigo || `SRV-${Math.floor(10000 + Math.random() * 90000)}`;
-
         const nuevoServicio = await prisma.servicio.create({
             data: {
-                codigo: codigoFinal,
-                nombre,
-                descripcion: descripcion || '',
+                nombre: String(nombre).trim(),
+                descripcion: descripcion ? String(descripcion).trim() : '',
                 activo: activo !== undefined ? Number(activo) : 1
             }
         });

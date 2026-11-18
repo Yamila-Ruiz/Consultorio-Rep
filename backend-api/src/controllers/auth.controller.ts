@@ -40,7 +40,6 @@ export const login = async (req: Request, res: Response) => {
             mensaje: 'Inicio de sesión exitoso',
             usuario: {
                 idUsuario: usuario.idUsuario,
-                codigo: usuario.codigo,
                 nombreUsuario: usuario.nombreUsuario,
                 rol,
                 perfil
@@ -58,7 +57,6 @@ export const getUsuarios = async (req: Request, res: Response) => {
         const usuarios = await prisma.usuario.findMany({
             select: {
                 idUsuario: true,
-                codigo: true,
                 nombreUsuario: true,
                 recepcionista: true,
                 terapeuta: true
@@ -74,7 +72,6 @@ export const getUsuarios = async (req: Request, res: Response) => {
 // Registrar un nuevo usuario junto con su perfil (recepcionista o terapeuta)
 export const registrarUsuario = async (req: Request, res: Response) => {
     const {
-        codigo,
         nombreUsuario,
         contrasena,
         rol,
@@ -83,34 +80,43 @@ export const registrarUsuario = async (req: Request, res: Response) => {
         especialidad
     } = req.body;
 
+    if (!nombreUsuario?.trim() || !contrasena?.trim() || !nombreCompleto?.trim()) {
+        res.status(400).json({ error: 'Debes completar nombre completo, usuario y contraseña' });
+        return;
+    }
+
     try {
-        const codigoUsuario = codigo || `USR-${Math.floor(10000 + Math.random() * 90000)}`;
+        const usuarioExistente = await prisma.usuario.findFirst({
+            where: { nombreUsuario: String(nombreUsuario).trim() }
+        });
+
+        if (usuarioExistente) {
+            res.status(409).json({ error: 'Ese nombre de usuario ya está en uso, elige otro' });
+            return;
+        }
 
         const resultado = await prisma.$transaction(async (tx) => {
             const nuevoUsuario = await tx.usuario.create({
                 data: {
-                    codigo: codigoUsuario.slice(0, 10),
-                    nombreUsuario: String(nombreUsuario).slice(0, 20),
+                    nombreUsuario: String(nombreUsuario).trim().slice(0, 20),
                     contrasena: String(contrasena).slice(0, 30)
                 }
             });
 
             let perfilCreado: unknown = null;
 
-            if (rol === 'recepcionista' && nombreCompleto) {
+            if (rol === 'recepcionista') {
                 perfilCreado = await tx.recepcionista.create({
                     data: {
-                        codigo: `REC-${Math.floor(10000 + Math.random() * 90000)}`,
-                        nombreCompleto: String(nombreCompleto).slice(0, 60),
+                        nombreCompleto: String(nombreCompleto).trim().slice(0, 60),
                         contactoTelefonico: String(contactoTelefonico || '').slice(0, 10),
                         idUsuario: nuevoUsuario.idUsuario
                     }
                 });
-            } else if (rol === 'terapeuta' && nombreCompleto) {
+            } else if (rol === 'terapeuta') {
                 perfilCreado = await tx.terapeuta.create({
                     data: {
-                        codigo: `TER-${Math.floor(10000 + Math.random() * 90000)}`,
-                        nombreCompleto: String(nombreCompleto),
+                        nombreCompleto: String(nombreCompleto).trim(),
                         contactoTelefonico: String(contactoTelefonico || '').slice(0, 10),
                         especialidad: String(especialidad || 'General').slice(0, 30),
                         idUsuario: nuevoUsuario.idUsuario
@@ -120,7 +126,6 @@ export const registrarUsuario = async (req: Request, res: Response) => {
 
             return {
                 idUsuario: nuevoUsuario.idUsuario,
-                codigo: nuevoUsuario.codigo,
                 nombreUsuario: nuevoUsuario.nombreUsuario,
                 rol: rol || 'usuario',
                 perfil: perfilCreado
@@ -130,7 +135,7 @@ export const registrarUsuario = async (req: Request, res: Response) => {
         res.status(201).json(resultado);
     } catch (error) {
         console.error('Error al registrar usuario:', error);
-        res.status(500).json({ error: 'Error al registrar el usuario (verifica que el código o nombre no estén duplicados)' });
+        res.status(500).json({ error: 'Error al registrar el usuario en la base de datos' });
     }
 };
 
@@ -148,7 +153,6 @@ export const updateUsuario = async (req: Request, res: Response) => {
             },
             select: {
                 idUsuario: true,
-                codigo: true,
                 nombreUsuario: true
             }
         });

@@ -40,14 +40,16 @@ export const getPagos = async (req: Request, res: Response) => {
 
 // Registrar un nuevo pago
 export const createPago = async (req: Request, res: Response) => {
-    const { codigo, fecha, metodo, facturacion, idCita } = req.body;
+    const { fecha, metodo, facturacion, idCita } = req.body;
+
+    if (!idCita || !metodo) {
+        res.status(400).json({ error: 'Debes indicar la cita y el método de pago' });
+        return;
+    }
 
     try {
-        const codigoFinal = codigo || `PAG-${Math.floor(10000 + Math.random() * 90000)}`;
-
         const nuevoPago = await prisma.pago.create({
             data: {
-                codigo: codigoFinal,
                 fecha: fecha ? new Date(fecha) : new Date(),
                 metodo,
                 facturacion: facturacion ? 1 : 0,

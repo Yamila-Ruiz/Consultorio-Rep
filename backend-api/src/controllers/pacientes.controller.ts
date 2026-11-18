@@ -44,9 +44,9 @@ export const createPaciente = async (req: Request, res: Response) => {
         const nuevoPaciente = await prisma.paciente.create({
             data: {
                 codigo: codigoFinal,
-                nombre,
-                aPaterno,
-                aMaterno,
+                nombre: nombre?.toUpperCase(),     // MODIFICADO
+                aPaterno: aPaterno?.toUpperCase(), // MODIFICADO
+                aMaterno: aMaterno?.toUpperCase(), // MODIFICADO
                 edad: Number(edad),
                 contactoTelefonico,
                 nombreFacturacion: nombreFacturacion || `${nombre} ${aPaterno}`,
@@ -80,9 +80,9 @@ export const updatePaciente = async (req: Request, res: Response) => {
         const pacienteActualizado = await prisma.paciente.update({
             where: { idPaciente: id },
             data: {
-                nombre,
-                aPaterno,
-                aMaterno,
+                nombre: nombre?.toUpperCase(),     // MODIFICADO
+                aPaterno: aPaterno?.toUpperCase(), // MODIFICADO
+                aMaterno: aMaterno?.toUpperCase(), // MODIFICADO
                 edad: Number(edad),
                 contactoTelefonico,
                 nombreFacturacion,

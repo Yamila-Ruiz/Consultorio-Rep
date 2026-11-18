@@ -27,6 +27,22 @@ import {
 import { IconArrowLeft, IconClock, IconEdit, IconUserPlus } from '@tabler/icons-react';
 import MainCard from 'ui-component/cards/MainCard';
 
+// AGREGADO — conserva los 10 dígitos en el estado del formulario.
+function soloDigitosTelefono(valor) {
+    return valor.replace(/\D/g, '').slice(0, 10);
+}
+
+// AGREGADO — muestra los separadores conforme se escribe.
+function mostrarTelefono(valor) {
+    const digitos = soloDigitosTelefono(valor ?? '');
+
+    if (digitos.length === 0) return '';
+    if (digitos.length <= 3) return `(${digitos}`;
+    if (digitos.length <= 6) return `(${digitos.slice(0, 3)})${digitos.slice(3)}`;
+
+    return `(${digitos.slice(0, 3)})${digitos.slice(3, 6)}-${digitos.slice(6)}`;
+}
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 export default function Terapeutas() {
@@ -227,7 +243,7 @@ export default function Terapeutas() {
                                 <TableCell>{t.codigo}</TableCell>
                                 <TableCell>{t.nombreCompleto}</TableCell>
                                 <TableCell>{t.especialidad}</TableCell>
-                                <TableCell>{t.contactoTelefonico}</TableCell>
+                                <TableCell>{mostrarTelefono(t.contactoTelefonico)}</TableCell>
                                 <TableCell>{t.usuario?.nombreUsuario || '—'}</TableCell>
                                 <TableCell align="right">
                                     <IconButton
@@ -330,9 +346,17 @@ export default function Terapeutas() {
                                     fullWidth
                                     required
                                     label="Teléfono (10 dígitos)"
-                                    inputProps={{ maxLength: 10 }}
-                                    value={formUsuario.contactoTelefonico}
-                                    onChange={(e) => setFormUsuario({ ...formUsuario, contactoTelefonico: e.target.value })}
+                                    type="tel"
+                                    placeholder="(555)555-5555"
+                                    inputProps={{
+                                        inputMode: 'numeric',
+                                        pattern: String.raw`\([0-9]{3}\)[0-9]{3}-[0-9]{4}`
+                                    }}
+                                    value={mostrarTelefono(formUsuario.contactoTelefonico)}
+                                    onChange={(e) => setFormUsuario({
+                                        ...formUsuario,
+                                        contactoTelefonico: soloDigitosTelefono(e.target.value)
+                                    })}
                                 />
                             </Grid>
                             {formUsuario.rol === 'terapeuta' && (
@@ -404,10 +428,18 @@ export default function Terapeutas() {
                                 <TextField
                                     fullWidth
                                     required
-                                    label="Teléfono"
-                                    inputProps={{ maxLength: 10 }}
-                                    value={terapeutaEdit.contactoTelefonico}
-                                    onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, contactoTelefonico: e.target.value })}
+                                    label="Teléfono (10 dígitos)"
+                                    type="tel"
+                                    placeholder="(555)555-5555"
+                                    inputProps={{
+                                        inputMode: 'numeric',
+                                        pattern: String.raw`\([0-9]{3}\)[0-9]{3}-[0-9]{4}`
+                                    }}
+                                    value={mostrarTelefono(terapeutaEdit.contactoTelefonico)}
+                                    onChange={(e) => setTerapeutaEdit({
+                                        ...terapeutaEdit,
+                                        contactoTelefonico: soloDigitosTelefono(e.target.value)
+                                    })}
                                 />
                             </Stack>
                         </DialogContent>

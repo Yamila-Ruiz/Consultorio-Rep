@@ -22,7 +22,7 @@ export const createServicio = async (req: Request, res: Response) => {
         const nuevoServicio = await prisma.servicio.create({
             data: {
                 codigo: codigoFinal,
-                nombre,
+                nombre: nombre?.toUpperCase(), // MODIFICADO
                 descripcion: descripcion || '',
                 activo: activo !== undefined ? Number(activo) : 1
             }
@@ -43,7 +43,7 @@ export const updateServicio = async (req: Request, res: Response) => {
         const servicioActualizado = await prisma.servicio.update({
             where: { idServicio: id },
             data: {
-                ...(nombre !== undefined && { nombre }),
+                ...(nombre !== undefined && { nombre: nombre?.toUpperCase() }), // MODIFICADO
                 ...(descripcion !== undefined && { descripcion }),
                 ...(activo !== undefined && { activo: Number(activo) })
             }

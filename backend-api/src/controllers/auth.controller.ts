@@ -110,7 +110,7 @@ export const registrarUsuario = async (req: Request, res: Response) => {
                 perfilCreado = await tx.terapeuta.create({
                     data: {
                         codigo: `TER-${Math.floor(10000 + Math.random() * 90000)}`,
-                        nombreCompleto: String(nombreCompleto),
+                        nombreCompleto: String(nombreCompleto).toUpperCase(), // MODIFICADO
                         contactoTelefonico: String(contactoTelefonico || '').slice(0, 10),
                         especialidad: String(especialidad || 'General').slice(0, 30),
                         idUsuario: nuevoUsuario.idUsuario

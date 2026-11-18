@@ -25,6 +25,22 @@ import {
 import { IconArrowLeft, IconEdit, IconPlus, IconSearch } from '@tabler/icons-react';
 import MainCard from 'ui-component/cards/MainCard';
 
+// AGREGADO — conserva los 10 dígitos en el estado del formulario.
+function soloDigitosTelefono(valor) {
+    return valor.replace(/\D/g, '').slice(0, 10);
+}
+
+// AGREGADO — muestra los separadores conforme se escribe.
+function mostrarTelefono(valor) {
+    const digitos = soloDigitosTelefono(valor ?? '');
+
+    if (digitos.length === 0) return '';
+    if (digitos.length <= 3) return `(${digitos}`;
+    if (digitos.length <= 6) return `(${digitos.slice(0, 3)})${digitos.slice(3)}`;
+
+    return `(${digitos.slice(0, 3)})${digitos.slice(3, 6)}-${digitos.slice(6)}`;
+}
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 const estadoInicial = {
@@ -182,7 +198,7 @@ export default function Pacientes() {
                                 <TableCell>{p.codigo}</TableCell>
                                 <TableCell>{`${p.nombre} ${p.aPaterno} ${p.aMaterno}`}</TableCell>
                                 <TableCell>{p.edad} años</TableCell>
-                                <TableCell>{p.contactoTelefonico}</TableCell>
+                                <TableCell>{mostrarTelefono(p.contactoTelefonico)}</TableCell>
                                 <TableCell>{p.terapeuta?.nombreCompleto || 'Sin asignar'}</TableCell>
                                 <TableCell align="right">
                                     <IconButton size="small" color="primary" onClick={() => abrirEditar(p)}>
@@ -253,9 +269,17 @@ export default function Pacientes() {
                                     fullWidth
                                     required
                                     label="Teléfono (10 dígitos)"
-                                    inputProps={{ maxLength: 10 }}
-                                    value={form.contactoTelefonico}
-                                    onChange={(e) => setForm({ ...form, contactoTelefonico: e.target.value })}
+                                    type="tel"
+                                    placeholder="(555)555-5555"
+                                    inputProps={{
+                                        inputMode: 'numeric',
+                                        pattern: String.raw`\([0-9]{3}\)[0-9]{3}-[0-9]{4}`
+                                    }}
+                                    value={mostrarTelefono(form.contactoTelefonico)}
+                                    onChange={(e) => setForm({
+                                        ...form,
+                                        contactoTelefonico: soloDigitosTelefono(e.target.value)
+                                    })}
                                 />
                             </Grid>
                             <Grid item xs={12}>

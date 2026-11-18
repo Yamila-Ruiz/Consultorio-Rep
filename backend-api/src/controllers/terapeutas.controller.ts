@@ -33,7 +33,7 @@ export const createTerapeuta = async (req: Request, res: Response) => {
         const nuevoTerapeuta = await prisma.terapeuta.create({
             data: {
                 codigo: codigoFinal,
-                nombreCompleto,
+                nombreCompleto: nombreCompleto?.toUpperCase(),
                 contactoTelefonico,
                 especialidad,
                 idUsuario: Number(idUsuario) || 1
@@ -55,7 +55,7 @@ export const updateTerapeuta = async (req: Request, res: Response) => {
         const terapeutaActualizado = await prisma.terapeuta.update({
             where: { idTerapeuta: id },
             data: {
-                nombreCompleto,
+                nombreCompleto: nombreCompleto?.toUpperCase(),
                 contactoTelefonico,
                 especialidad,
                 ...(idUsuario && { idUsuario: Number(idUsuario) })

@@ -108,7 +108,7 @@ export const registrarUsuario = async (req: Request, res: Response) => {
             if (rol === 'recepcionista') {
                 perfilCreado = await tx.recepcionista.create({
                     data: {
-                        nombreCompleto: String(nombreCompleto).trim().slice(0, 60),
+                        nombreCompleto: String(nombreCompleto).trim().slice(0, 60).toUpperCase(),
                         contactoTelefonico: String(contactoTelefonico || '').slice(0, 10),
                         idUsuario: nuevoUsuario.idUsuario
                     }
@@ -116,7 +116,7 @@ export const registrarUsuario = async (req: Request, res: Response) => {
             } else if (rol === 'terapeuta') {
                 perfilCreado = await tx.terapeuta.create({
                     data: {
-                        nombreCompleto: String(nombreCompleto).trim(),
+                        nombreCompleto: String(nombreCompleto).trim().toUpperCase(),
                         contactoTelefonico: String(contactoTelefonico || '').slice(0, 10),
                         especialidad: String(especialidad || 'General').slice(0, 30),
                         idUsuario: nuevoUsuario.idUsuario

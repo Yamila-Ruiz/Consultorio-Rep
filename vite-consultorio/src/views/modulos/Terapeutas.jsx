@@ -10,11 +10,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   Grid,
   IconButton,
   MenuItem,
   Paper,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -22,12 +24,33 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography
 } from '@mui/material';
-import { IconArrowLeft, IconClock, IconEdit, IconUserPlus } from '@tabler/icons-react';
+import { IconArrowLeft, IconClock, IconEdit, IconRefresh, IconTrash, IconUserPlus } from '@tabler/icons-react';
 import MainCard from 'ui-component/cards/MainCard';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+// Muestra primero Nombre(s), luego Apellido Paterno y Apellido Materno
+const formatearNombre = (persona) => {
+  if (!persona) return '—';
+  return `${persona.nombre || ''} ${persona.aPaterno || ''} ${persona.aMaterno || ''}`.trim().toUpperCase();
+};
+
+const formatearTelefono = (valor) => {
+  const digitos = String(valor || '')
+    .replace(/\D/g, '')
+    .slice(0, 10);
+  if (digitos.length < 3) return digitos;
+  if (digitos.length === 3) {
+    return String(valor || '').endsWith(')') ? `(${digitos})` : digitos;
+  }
+  if (digitos.length <= 6) {
+    return `(${digitos.slice(0, 3)})${digitos.slice(3)}`;
+  }
+  return `(${digitos.slice(0, 3)})${digitos.slice(3, 6)}-${digitos.slice(6, 10)}`;
+};
 
 export default function Terapeutas() {
   const navigate = useNavigate();
@@ -42,10 +65,11 @@ export default function Terapeutas() {
   const [openRegistro, setOpenRegistro] = useState(false);
   const [formUsuario, setFormUsuario] = useState({
     rol: 'terapeuta',
-    nombreCompleto: '',
+    nombre: '',
+    aPaterno: '',
+    aMaterno: '',
     contactoTelefonico: '',
     especialidad: '',
-    nombreUsuario: '',
     contrasena: ''
   });
 
@@ -65,7 +89,16 @@ export default function Terapeutas() {
   const cargarDatos = async () => {
     try {
       const [resTer, resSlots] = await Promise.all([fetch(`${API_URL}/terapeutas`), fetch(`${API_URL}/slots`)]);
-      if (resTer.ok) setTerapeutas(await resTer.json());
+      if (resTer.ok) {
+        const dataTer = await resTer.json();
+        dataTer.sort(
+          (a, b) =>
+            (a.aPaterno || '').localeCompare(b.aPaterno || '', 'es') ||
+            (a.aMaterno || '').localeCompare(b.aMaterno || '', 'es') ||
+            (a.nombre || '').localeCompare(b.nombre || '', 'es')
+        );
+        setTerapeutas(dataTer);
+      }
       if (resSlots.ok) setSlots(await resSlots.json());
     } catch (error) {
       console.error('Error al cargar terapeutas:', error);
@@ -80,11 +113,24 @@ export default function Terapeutas() {
     e.preventDefault();
     setMensaje({ tipo: '', texto: '' });
 
+    const telefonoLimpio = formUsuario.contactoTelefonico.replace(/\D/g, '');
+    if (telefonoLimpio.length !== 10) {
+      setMensaje({ tipo: 'error', texto: 'El teléfono debe tener exactamente 10 dígitos.' });
+      return;
+    }
+
     try {
       const res = await fetch(`${API_URL}/auth/registro`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formUsuario)
+        body: JSON.stringify({
+          ...formUsuario,
+          nombre: formUsuario.nombre.trim().toUpperCase(),
+          aPaterno: formUsuario.aPaterno.trim().toUpperCase(),
+          aMaterno: formUsuario.aMaterno.trim().toUpperCase(),
+          especialidad: formUsuario.especialidad.trim().toUpperCase(),
+          contactoTelefonico: telefonoLimpio
+        })
       });
       const data = await res.json();
 
@@ -93,14 +139,18 @@ export default function Terapeutas() {
         return;
       }
 
-      setMensaje({ tipo: 'success', texto: 'Usuario y perfil registrados correctamente' });
+      setMensaje({
+        tipo: 'success',
+        texto: `Usuario registrado correctamente. Usuario generado: ${data.nombreUsuario}`
+      });
       setOpenRegistro(false);
       setFormUsuario({
         rol: 'terapeuta',
-        nombreCompleto: '',
+        nombre: '',
+        aPaterno: '',
+        aMaterno: '',
         contactoTelefonico: '',
         especialidad: '',
-        nombreUsuario: '',
         contrasena: ''
       });
       cargarDatos();
@@ -111,23 +161,87 @@ export default function Terapeutas() {
 
   const handleActualizarTerapeuta = async (e) => {
     e.preventDefault();
+    setMensaje({ tipo: '', texto: '' });
+
+    const telefonoLimpio = (terapeutaEdit.contactoTelefonico || '').replace(/\D/g, '');
+    if (telefonoLimpio.length !== 10) {
+      setMensaje({ tipo: 'error', texto: 'El teléfono debe tener exactamente 10 dígitos.' });
+      return;
+    }
+
     try {
       const res = await fetch(`${API_URL}/terapeutas/${terapeutaEdit.idTerapeuta}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          nombreCompleto: terapeutaEdit.nombreCompleto,
-          contactoTelefonico: terapeutaEdit.contactoTelefonico,
-          especialidad: terapeutaEdit.especialidad
+          nombre: terapeutaEdit.nombre.trim().toUpperCase(),
+          aPaterno: terapeutaEdit.aPaterno.trim().toUpperCase(),
+          aMaterno: terapeutaEdit.aMaterno.trim().toUpperCase(),
+          contactoTelefonico: telefonoLimpio,
+          especialidad: terapeutaEdit.especialidad.trim().toUpperCase(),
+          activo: Boolean(terapeutaEdit.activo)
         })
       });
-      if (res.ok) {
-        setMensaje({ tipo: 'success', texto: 'Datos del terapeuta actualizados' });
-        setOpenEditar(false);
-        cargarDatos();
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo actualizar el terapeuta' });
+        return;
       }
+
+      setMensaje({ tipo: 'success', texto: 'Datos del terapeuta actualizados' });
+      setOpenEditar(false);
+      cargarDatos();
     } catch {
-      setMensaje({ tipo: 'error', texto: 'No se pudo actualizar el terapeuta' });
+      setMensaje({ tipo: 'error', texto: 'Error de conexión al actualizar el terapeuta' });
+    }
+  };
+
+  const handleEliminarTerapeuta = async (terapeuta) => {
+    const confirmado = window.confirm(`¿Deseas dar de baja al terapeuta ${formatearNombre(terapeuta)}?`);
+    if (!confirmado) return;
+
+    setMensaje({ tipo: '', texto: '' });
+    try {
+      const res = await fetch(`${API_URL}/terapeutas/${terapeuta.idTerapeuta}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo dar de baja al terapeuta' });
+        return;
+      }
+
+      setMensaje({ tipo: 'success', texto: 'Terapeuta dado de baja correctamente' });
+      cargarDatos();
+    } catch {
+      setMensaje({ tipo: 'error', texto: 'Error de conexión al dar de baja al terapeuta' });
+    }
+  };
+
+  const handleReactivarTerapeuta = async (terapeuta) => {
+    const confirmado = window.confirm(`¿Deseas reactivar al terapeuta ${formatearNombre(terapeuta)}?`);
+    if (!confirmado) return;
+
+    setMensaje({ tipo: '', texto: '' });
+    try {
+      const res = await fetch(`${API_URL}/terapeutas/${terapeuta.idTerapeuta}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activo: true })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo reactivar al terapeuta' });
+        return;
+      }
+
+      setMensaje({ tipo: 'success', texto: 'Terapeuta reactivado correctamente' });
+      cargarDatos();
+    } catch {
+      setMensaje({ tipo: 'error', texto: 'Error de conexión al reactivar al terapeuta' });
     }
   };
 
@@ -155,6 +269,9 @@ export default function Terapeutas() {
       setMensaje({ tipo: 'error', texto: 'Error de conexión al registrar horario' });
     }
   };
+
+  const terapeutasActivos = terapeutas.filter((t) => t.activo !== false && t.activo !== 0);
+  const terapeutasInactivos = terapeutas.filter((t) => t.activo === false || t.activo === 0);
 
   return (
     <MainCard
@@ -199,7 +316,13 @@ export default function Terapeutas() {
                 <strong>Código</strong>
               </TableCell>
               <TableCell>
-                <strong>Nombre Completo</strong>
+                <strong>Nombre(s)</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Paterno</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Materno</strong>
               </TableCell>
               <TableCell>
                 <strong>Especialidad</strong>
@@ -216,31 +339,114 @@ export default function Terapeutas() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {terapeutas.map((t) => (
+            {terapeutasActivos.map((t) => (
               <TableRow key={t.idTerapeuta}>
                 <TableCell>{`T-${t.idTerapeuta}`}</TableCell>
-                <TableCell>{t.nombreCompleto}</TableCell>
-                <TableCell>{t.especialidad}</TableCell>
-                <TableCell>{t.contactoTelefonico}</TableCell>
-                <TableCell>{t.usuario?.nombreUsuario || '—'}</TableCell>
+                <TableCell>{(t.nombre || '').toUpperCase()}</TableCell>
+                <TableCell>{(t.aPaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{(t.aMaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{(t.especialidad || '').toUpperCase()}</TableCell>
+                <TableCell>{formatearTelefono(t.contactoTelefonico)}</TableCell>
+                <TableCell>{(t.usuario?.nombreUsuario || '—').toUpperCase()}</TableCell>
                 <TableCell align="right">
-                  <IconButton
-                    size="small"
-                    color="primary"
-                    onClick={() => {
-                      setTerapeutaEdit(t);
-                      setOpenEditar(true);
-                    }}
-                  >
-                    <IconEdit size={18} />
-                  </IconButton>
+                  <Tooltip title="Editar">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={() => {
+                        setTerapeutaEdit({
+                          ...t,
+                          nombre: (t.nombre || '').toUpperCase(),
+                          aPaterno: (t.aPaterno || '').toUpperCase(),
+                          aMaterno: (t.aMaterno || '').toUpperCase(),
+                          especialidad: (t.especialidad || '').toUpperCase(),
+                          contactoTelefonico: formatearTelefono(t.contactoTelefonico),
+                          activo: true
+                        });
+                        setOpenEditar(true);
+                      }}
+                    >
+                      <IconEdit size={18} />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Dar de baja">
+                    <IconButton size="small" color="error" onClick={() => handleEliminarTerapeuta(t)}>
+                      <IconTrash size={18} />
+                    </IconButton>
+                  </Tooltip>
                 </TableCell>
               </TableRow>
             ))}
-            {terapeutas.length === 0 && (
+            {terapeutasActivos.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} align="center">
-                  No hay terapeutas registrados aún.
+                <TableCell colSpan={8} align="center">
+                  No hay terapeutas activos registrados aún.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <Divider sx={{ my: 3 }} />
+
+      <Typography variant="h4" sx={{ mb: 2 }}>
+        TERAPEUTAS DADOS DE BAJA
+      </Typography>
+
+      <TableContainer component={Paper} variant="outlined" sx={{ mb: 4 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>
+                <strong>Código</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Nombre(s)</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Paterno</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Materno</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Especialidad</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Teléfono</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Usuario</strong>
+              </TableCell>
+              <TableCell align="right">
+                <strong>Acciones</strong>
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {terapeutasInactivos.map((t) => (
+              <TableRow key={t.idTerapeuta} sx={{ opacity: 0.75 }}>
+                <TableCell>{`T-${t.idTerapeuta}`}</TableCell>
+                <TableCell>{(t.nombre || '').toUpperCase()}</TableCell>
+                <TableCell>{(t.aPaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{(t.aMaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{(t.especialidad || '').toUpperCase()}</TableCell>
+                <TableCell>{formatearTelefono(t.contactoTelefonico)}</TableCell>
+                <TableCell>{(t.usuario?.nombreUsuario || '—').toUpperCase()}</TableCell>
+                <TableCell align="right">
+                  <Tooltip title="Reactivar terapeuta">
+                    <IconButton size="small" color="success" onClick={() => handleReactivarTerapeuta(t)}>
+                      <IconRefresh size={18} />
+                    </IconButton>
+                  </Tooltip>
+                </TableCell>
+              </TableRow>
+            ))}
+            {terapeutasInactivos.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  No hay terapeutas dados de baja.
                 </TableCell>
               </TableRow>
             )}
@@ -278,12 +484,12 @@ export default function Terapeutas() {
           <TableBody>
             {slots.map((s) => (
               <TableRow key={s.idSlot}>
-                <TableCell>{s.terapeuta?.nombreCompleto}</TableCell>
+                <TableCell>{formatearNombre(s.terapeuta)}</TableCell>
                 <TableCell>{s.fecha?.split('T')[0]}</TableCell>
                 <TableCell>{s.inicio?.split('T')[1]?.slice(0, 5)}</TableCell>
                 <TableCell>{s.fin?.split('T')[1]?.slice(0, 5)}</TableCell>
                 <TableCell>
-                  <Chip label={s.estado === 1 ? 'Disponible' : 'Ocupado'} color={s.estado === 1 ? 'success' : 'default'} size="small" />
+                  <Chip label={s.estado === 1 ? 'DISPONIBLE' : 'OCUPADO'} color={s.estado === 1 ? 'success' : 'default'} size="small" />
                 </TableCell>
               </TableRow>
             ))}
@@ -312,27 +518,48 @@ export default function Terapeutas() {
                   value={formUsuario.rol}
                   onChange={(e) => setFormUsuario({ ...formUsuario, rol: e.target.value })}
                 >
-                  <MenuItem value="terapeuta">Terapeuta</MenuItem>
-                  <MenuItem value="recepcionista">Recepcionista</MenuItem>
+                  <MenuItem value="terapeuta">TERAPEUTA</MenuItem>
+                  <MenuItem value="recepcionista">RECEPCIONISTA</MenuItem>
                 </TextField>
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={4}>
                 <TextField
                   fullWidth
                   required
-                  label="Nombre Completo"
-                  value={formUsuario.nombreCompleto}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, nombreCompleto: e.target.value })}
+                  label="Nombre(s)"
+                  inputProps={{ maxLength: 60 }}
+                  value={formUsuario.nombre}
+                  onChange={(e) => setFormUsuario({ ...formUsuario, nombre: e.target.value.toUpperCase() })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  required
+                  label="Apellido Paterno"
+                  inputProps={{ maxLength: 60 }}
+                  value={formUsuario.aPaterno}
+                  onChange={(e) => setFormUsuario({ ...formUsuario, aPaterno: e.target.value.toUpperCase() })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  required
+                  label="Apellido Materno"
+                  inputProps={{ maxLength: 60 }}
+                  value={formUsuario.aMaterno}
+                  onChange={(e) => setFormUsuario({ ...formUsuario, aMaterno: e.target.value.toUpperCase() })}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
                   required
-                  label="Teléfono (10 dígitos)"
-                  inputProps={{ maxLength: 10 }}
+                  label="Teléfono"
+                  inputProps={{ maxLength: 13 }}
                   value={formUsuario.contactoTelefonico}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, contactoTelefonico: e.target.value })}
+                  onChange={(e) => setFormUsuario({ ...formUsuario, contactoTelefonico: formatearTelefono(e.target.value) })}
                 />
               </Grid>
               {formUsuario.rol === 'terapeuta' && (
@@ -343,21 +570,11 @@ export default function Terapeutas() {
                     label="Especialidad"
                     inputProps={{ maxLength: 30 }}
                     value={formUsuario.especialidad}
-                    onChange={(e) => setFormUsuario({ ...formUsuario, especialidad: e.target.value })}
+                    onChange={(e) => setFormUsuario({ ...formUsuario, especialidad: e.target.value.toUpperCase() })}
                   />
                 </Grid>
               )}
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  required
-                  label="Nombre de Usuario (Login)"
-                  inputProps={{ maxLength: 20 }}
-                  value={formUsuario.nombreUsuario}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, nombreUsuario: e.target.value })}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={formUsuario.rol === 'terapeuta' ? 12 : 6}>
                 <TextField
                   fullWidth
                   required
@@ -366,6 +583,7 @@ export default function Terapeutas() {
                   inputProps={{ maxLength: 30 }}
                   value={formUsuario.contrasena}
                   onChange={(e) => setFormUsuario({ ...formUsuario, contrasena: e.target.value })}
+                  helperText="El usuario se creará automáticamente como ROL + PRIMER NOMBRE (en mayúsculas)"
                 />
               </Grid>
             </Grid>
@@ -389,25 +607,51 @@ export default function Terapeutas() {
                 <TextField
                   fullWidth
                   required
-                  label="Nombre Completo"
-                  value={terapeutaEdit.nombreCompleto}
-                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, nombreCompleto: e.target.value })}
+                  label="Nombre(s)"
+                  inputProps={{ maxLength: 60 }}
+                  value={terapeutaEdit.nombre || ''}
+                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, nombre: e.target.value.toUpperCase() })}
+                />
+                <TextField
+                  fullWidth
+                  required
+                  label="Apellido Paterno"
+                  inputProps={{ maxLength: 60 }}
+                  value={terapeutaEdit.aPaterno || ''}
+                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, aPaterno: e.target.value.toUpperCase() })}
+                />
+                <TextField
+                  fullWidth
+                  required
+                  label="Apellido Materno"
+                  inputProps={{ maxLength: 60 }}
+                  value={terapeutaEdit.aMaterno || ''}
+                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, aMaterno: e.target.value.toUpperCase() })}
                 />
                 <TextField
                   fullWidth
                   required
                   label="Especialidad"
                   inputProps={{ maxLength: 30 }}
-                  value={terapeutaEdit.especialidad}
-                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, especialidad: e.target.value })}
+                  value={terapeutaEdit.especialidad || ''}
+                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, especialidad: e.target.value.toUpperCase() })}
                 />
                 <TextField
                   fullWidth
                   required
                   label="Teléfono"
-                  inputProps={{ maxLength: 10 }}
-                  value={terapeutaEdit.contactoTelefonico}
-                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, contactoTelefonico: e.target.value })}
+                  inputProps={{ maxLength: 13 }}
+                  value={terapeutaEdit.contactoTelefonico || ''}
+                  onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, contactoTelefonico: formatearTelefono(e.target.value) })}
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={Boolean(terapeutaEdit.activo)}
+                      onChange={(e) => setTerapeutaEdit({ ...terapeutaEdit, activo: e.target.checked })}
+                    />
+                  }
+                  label="Terapeuta activo"
                 />
               </Stack>
             </DialogContent>
@@ -435,9 +679,9 @@ export default function Terapeutas() {
                 value={formSlot.idTerapeuta}
                 onChange={(e) => setFormSlot({ ...formSlot, idTerapeuta: e.target.value })}
               >
-                {terapeutas.map((t) => (
+                {terapeutasActivos.map((t) => (
                   <MenuItem key={t.idTerapeuta} value={t.idTerapeuta}>
-                    {t.nombreCompleto} ({t.especialidad})
+                    {`${formatearNombre(t)} (${(t.especialidad || '').toUpperCase()})`}
                   </MenuItem>
                 ))}
               </TextField>

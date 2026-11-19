@@ -6,13 +6,13 @@ export const login = async (req: Request, res: Response) => {
     const { nombreUsuario, contrasena } = req.body;
 
     if (!nombreUsuario || !contrasena) {
-        res.status(400).json({ error: 'Debes ingresar usuario y contraseña' });
+        res.status(400).json({ error: 'Debe ingresar usuario y contraseña' });
         return;
     }
 
     try {
         const usuario = await prisma.usuario.findFirst({
-            where: { nombreUsuario },
+            where: { nombreUsuario: String(nombreUsuario).trim().toUpperCase() },
             include: {
                 recepcionista: true,
                 terapeuta: true
@@ -24,16 +24,19 @@ export const login = async (req: Request, res: Response) => {
             return;
         }
 
-        // Determina el rol según la tabla con la que esté vinculado el usuario
         let rol = 'usuario';
         let perfil: unknown = null;
 
-        if (usuario.recepcionista.length > 0) {
+        if (usuario.recepcionista) {
             rol = 'recepcionista';
-            perfil = usuario.recepcionista[0];
-        } else if (usuario.terapeuta.length > 0) {
+            perfil = usuario.recepcionista;
+        } else if (usuario.terapeuta) {
+            if (usuario.terapeuta.activo === false) {
+                res.status(403).json({ error: 'Esta cuenta de terapeuta está dada de baja.' });
+                return;
+            }
             rol = 'terapeuta';
-            perfil = usuario.terapeuta[0];
+            perfil = usuario.terapeuta;
         }
 
         res.json({
@@ -51,7 +54,7 @@ export const login = async (req: Request, res: Response) => {
     }
 };
 
-// Obtener todos los usuarios (sin exponer contraseñas)
+// Obtener todos los usuarios ordenados alfabéticamente por apellidos
 export const getUsuarios = async (req: Request, res: Response) => {
     try {
         const usuarios = await prisma.usuario.findMany({
@@ -62,63 +65,105 @@ export const getUsuarios = async (req: Request, res: Response) => {
                 terapeuta: true
             }
         });
-        res.json(usuarios);
+
+        const usuariosActivos = usuarios.filter(
+            (u) => !u.terapeuta || u.terapeuta.activo !== false
+        );
+
+        usuariosActivos.sort((a, b) => {
+            const pA = a.recepcionista || a.terapeuta || { aPaterno: '', aMaterno: '', nombre: '' };
+            const pB = b.recepcionista || b.terapeuta || { aPaterno: '', aMaterno: '', nombre: '' };
+            return (
+                (pA.aPaterno || '').localeCompare(pB.aPaterno || '', 'es') ||
+                (pA.aMaterno || '').localeCompare(pB.aMaterno || '', 'es') ||
+                (pA.nombre || '').localeCompare(pB.nombre || '', 'es')
+            );
+        });
+
+        res.json(usuariosActivos);
     } catch (error) {
         console.error('Error al obtener usuarios:', error);
         res.status(500).json({ error: 'Error al obtener la lista de usuarios' });
     }
 };
 
-// Registrar un nuevo usuario junto con su perfil (recepcionista o terapeuta)
+// Registrar un nuevo usuario como "RECEPCIONISTA NOMBRE" o "TERAPEUTA NOMBRE" junto con su perfil
 export const registrarUsuario = async (req: Request, res: Response) => {
     const {
-        nombreUsuario,
         contrasena,
         rol,
-        nombreCompleto,
+        nombre,
+        aPaterno,
+        aMaterno,
         contactoTelefonico,
         especialidad
     } = req.body;
 
-    if (!nombreUsuario?.trim() || !contrasena?.trim() || !nombreCompleto?.trim()) {
-        res.status(400).json({ error: 'Debes completar nombre completo, usuario y contraseña' });
+    const telefono = String(contactoTelefonico || '').replace(/\D/g, '');
+    const rolNormalizado = String(rol || '').trim().toLowerCase();
+
+    if (
+        (rolNormalizado !== 'recepcionista' && rolNormalizado !== 'terapeuta') ||
+        !contrasena?.trim() ||
+        !nombre?.trim() ||
+        !aPaterno?.trim() ||
+        !aMaterno?.trim() ||
+        !/^\d{10}$/.test(telefono)
+    ) {
+        res.status(400).json({ error: 'Completa todos los campos obligatorios y verifica que el teléfono tenga 10 dígitos.' });
         return;
     }
 
+    if (rolNormalizado === 'terapeuta' && !especialidad?.trim()) {
+        res.status(400).json({ error: 'La especialidad es obligatoria para el rol de terapeuta.' });
+        return;
+    }
+
+    // Genera "RECEPCIONISTA YAMILA" o "TERAPEUTA LAURA" en mayúsculas
+    const rolMayus = rolNormalizado.toUpperCase();
+    const primerNombreMayus = nombre.trim().split(/\s+/)[0].toUpperCase();
+    const nombreUsuarioGenerado = `${rolMayus} ${primerNombreMayus}`;
+
     try {
         const usuarioExistente = await prisma.usuario.findFirst({
-            where: { nombreUsuario: String(nombreUsuario).trim() }
+            where: { nombreUsuario: nombreUsuarioGenerado }
         });
 
         if (usuarioExistente) {
-            res.status(409).json({ error: 'Ese nombre de usuario ya está en uso, elige otro' });
+            res.status(409).json({
+                error: `El usuario "${nombreUsuarioGenerado}" ya existe.`
+            });
             return;
         }
 
         const resultado = await prisma.$transaction(async (tx) => {
             const nuevoUsuario = await tx.usuario.create({
                 data: {
-                    nombreUsuario: String(nombreUsuario).trim().slice(0, 20),
-                    contrasena: String(contrasena).slice(0, 30)
+                    nombreUsuario: nombreUsuarioGenerado,
+                    contrasena: String(contrasena).trim().slice(0, 30)
                 }
             });
 
             let perfilCreado: unknown = null;
 
-            if (rol === 'recepcionista') {
+            if (rolNormalizado === 'recepcionista') {
                 perfilCreado = await tx.recepcionista.create({
                     data: {
-                        nombreCompleto: String(nombreCompleto).trim().slice(0, 60).toUpperCase(),
-                        contactoTelefonico: String(contactoTelefonico || '').slice(0, 10),
+                        nombre: String(nombre).trim().slice(0, 60).toUpperCase(),
+                        aPaterno: String(aPaterno).trim().slice(0, 60).toUpperCase(),
+                        aMaterno: String(aMaterno).trim().slice(0, 60).toUpperCase(),
+                        contactoTelefonico: telefono,
                         idUsuario: nuevoUsuario.idUsuario
                     }
                 });
-            } else if (rol === 'terapeuta') {
+            } else if (rolNormalizado === 'terapeuta') {
                 perfilCreado = await tx.terapeuta.create({
                     data: {
-                        nombreCompleto: String(nombreCompleto).trim().toUpperCase(),
-                        contactoTelefonico: String(contactoTelefonico || '').slice(0, 10),
-                        especialidad: String(especialidad || 'General').slice(0, 30),
+                        nombre: String(nombre).trim().slice(0, 60).toUpperCase(),
+                        aPaterno: String(aPaterno).trim().slice(0, 60).toUpperCase(),
+                        aMaterno: String(aMaterno).trim().slice(0, 60).toUpperCase(),
+                        contactoTelefonico: telefono,
+                        especialidad: String(especialidad).trim().slice(0, 30).toUpperCase(),
                         idUsuario: nuevoUsuario.idUsuario
                     }
                 });
@@ -127,7 +172,7 @@ export const registrarUsuario = async (req: Request, res: Response) => {
             return {
                 idUsuario: nuevoUsuario.idUsuario,
                 nombreUsuario: nuevoUsuario.nombreUsuario,
-                rol: rol || 'usuario',
+                rol: rolNormalizado,
                 perfil: perfilCreado
             };
         });
@@ -148,8 +193,8 @@ export const updateUsuario = async (req: Request, res: Response) => {
         const usuarioActualizado = await prisma.usuario.update({
             where: { idUsuario: id },
             data: {
-                ...(nombreUsuario !== undefined && { nombreUsuario: String(nombreUsuario).slice(0, 20) }),
-                ...(contrasena !== undefined && { contrasena: String(contrasena).slice(0, 30) })
+                ...(nombreUsuario !== undefined && { nombreUsuario: String(nombreUsuario).trim().toUpperCase().slice(0, 50) }),
+                ...(contrasena !== undefined && { contrasena: String(contrasena).trim().slice(0, 30) })
             },
             select: {
                 idUsuario: true,
@@ -174,6 +219,6 @@ export const deleteUsuario = async (req: Request, res: Response) => {
         res.json({ mensaje: 'Usuario eliminado correctamente' });
     } catch (error) {
         console.error('Error al eliminar usuario:', error);
-        res.status(500).json({ error: 'No se pudo eliminar el usuario (verifica si tiene un perfil de terapeuta o recepcionista vinculado)' });
+        res.status(500).json({ error: 'No se pudo eliminar el usuario' });
     }
 };

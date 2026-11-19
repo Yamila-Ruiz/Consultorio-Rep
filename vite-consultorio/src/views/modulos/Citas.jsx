@@ -27,6 +27,20 @@ import MainCard from 'ui-component/cards/MainCard';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
+// Muestra primero Nombre(s), luego Apellido Paterno y Apellido Materno
+const formatearNombre = (persona) => {
+  if (!persona) return '—';
+  return `${persona.nombre || ''} ${persona.aPaterno || ''} ${persona.aMaterno || ''}`.trim().toUpperCase();
+};
+
+const ordenarPorApellidos = (lista) =>
+  [...lista].sort(
+    (a, b) =>
+      (a.aPaterno || '').localeCompare(b.aPaterno || '', 'es') ||
+      (a.aMaterno || '').localeCompare(b.aMaterno || '', 'es') ||
+      (a.nombre || '').localeCompare(b.nombre || '', 'es')
+  );
+
 export default function Citas() {
   const navigate = useNavigate();
   const [citas, setCitas] = useState([]);
@@ -56,9 +70,18 @@ export default function Citas() {
       ]);
 
       if (resCitas.ok) setCitas(await resCitas.json());
-      if (resPac.ok) setPacientes(await resPac.json());
-      if (resSrv.ok) setServicios(await resSrv.json());
-      if (resTer.ok) setTerapeutas(await resTer.json());
+      if (resPac.ok) {
+        const dataPac = await resPac.json();
+        setPacientes(ordenarPorApellidos(dataPac.filter((p) => Boolean(p.activo))));
+      }
+      if (resSrv.ok) {
+        const dataSrv = await resSrv.json();
+        setServicios(dataSrv.filter((s) => Boolean(s.activo)));
+      }
+      if (resTer.ok) {
+        const dataTer = await resTer.json();
+        setTerapeutas(ordenarPorApellidos(dataTer.filter((t) => Boolean(t.activo))));
+      }
       if (resSlots.ok) setSlots(await resSlots.json());
     } catch (error) {
       console.error('Error al cargar datos de citas:', error);
@@ -167,12 +190,12 @@ export default function Citas() {
                 <TableCell>{`C-${c.idCita}`}</TableCell>
                 <TableCell>{c.fecha?.split('T')[0]}</TableCell>
                 <TableCell>{c.hora?.split('T')[1]?.slice(0, 5)}</TableCell>
-                <TableCell>{c.paciente ? `${c.paciente.nombre} ${c.paciente.aPaterno}` : '—'}</TableCell>
-                <TableCell>{c.slotdisponibilidad?.terapeuta?.nombreCompleto || '—'}</TableCell>
-                <TableCell>{c.servicio?.nombre || '—'}</TableCell>
-                <TableCell>{c.esPrimeraSesion === 1 ? 'Primera vez' : 'Subsecuente'}</TableCell>
+                <TableCell>{formatearNombre(c.paciente)}</TableCell>
+                <TableCell>{formatearNombre(c.slotdisponibilidad?.terapeuta)}</TableCell>
+                <TableCell>{(c.servicio?.nombre || '—').toUpperCase()}</TableCell>
+                <TableCell>{c.esPrimeraSesion === 1 ? 'PRIMERA VEZ' : 'SUBSECUENTE'}</TableCell>
                 <TableCell>
-                  <Chip label={c.estado} color="primary" size="small" />
+                  <Chip label={(c.estado || '').toUpperCase()} color="primary" size="small" />
                 </TableCell>
               </TableRow>
             ))}
@@ -207,7 +230,7 @@ export default function Citas() {
               >
                 {pacientes.map((p) => (
                   <MenuItem key={p.idPaciente} value={p.idPaciente}>
-                    {p.nombre} {p.aPaterno} {p.aMaterno}
+                    {formatearNombre(p)}
                   </MenuItem>
                 ))}
               </TextField>
@@ -220,13 +243,11 @@ export default function Citas() {
                 value={form.idServicio}
                 onChange={(e) => setForm({ ...form, idServicio: e.target.value })}
               >
-                {servicios
-                  .filter((s) => s.activo === 1)
-                  .map((s) => (
-                    <MenuItem key={s.idServicio} value={s.idServicio}>
-                      {s.nombre}
-                    </MenuItem>
-                  ))}
+                {servicios.map((s) => (
+                  <MenuItem key={s.idServicio} value={s.idServicio}>
+                    {(s.nombre || '').toUpperCase()}
+                  </MenuItem>
+                ))}
               </TextField>
 
               <TextField
@@ -239,10 +260,10 @@ export default function Citas() {
                   setForm({ ...form, idSlot: '' });
                 }}
               >
-                <MenuItem value="">Todos los terapeutas</MenuItem>
+                <MenuItem value="">TODOS LOS TERAPEUTAS</MenuItem>
                 {terapeutas.map((t) => (
                   <MenuItem key={t.idTerapeuta} value={t.idTerapeuta}>
-                    {t.nombreCompleto} ({t.especialidad})
+                    {formatearNombre(t)} ({(t.especialidad || '').toUpperCase()})
                   </MenuItem>
                 ))}
               </TextField>
@@ -263,7 +284,7 @@ export default function Citas() {
                 {slotsDisponibles.map((s) => (
                   <MenuItem key={s.idSlot} value={s.idSlot}>
                     {s.fecha?.split('T')[0]} | {s.inicio?.split('T')[1]?.slice(0, 5)} - {s.fin?.split('T')[1]?.slice(0, 5)} —{' '}
-                    {s.terapeuta?.nombreCompleto}
+                    {formatearNombre(s.terapeuta)}
                   </MenuItem>
                 ))}
               </TextField>

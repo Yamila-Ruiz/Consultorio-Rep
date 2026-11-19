@@ -9,6 +9,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControlLabel,
   IconButton,
   Paper,
@@ -20,9 +21,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TextField
+  TextField,
+  Tooltip,
+  Typography
 } from '@mui/material';
-import { IconArrowLeft, IconEdit, IconPlus } from '@tabler/icons-react';
+import { IconArrowLeft, IconEdit, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react';
 import MainCard from 'ui-component/cards/MainCard';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
@@ -39,7 +42,11 @@ export default function Servicios() {
   const cargarServicios = async () => {
     try {
       const res = await fetch(`${API_URL}/servicios`);
-      if (res.ok) setServicios(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        data.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es'));
+        setServicios(data);
+      }
     } catch (error) {
       console.error('Error al cargar servicios:', error);
     }
@@ -58,9 +65,9 @@ export default function Servicios() {
   const abrirEditar = (srv) => {
     setEditandoId(srv.idServicio);
     setForm({
-      nombre: srv.nombre,
-      descripcion: srv.descripcion,
-      activo: srv.activo === 1
+      nombre: (srv.nombre || '').toUpperCase(),
+      descripcion: (srv.descripcion || '').toUpperCase(),
+      activo: Boolean(srv.activo)
     });
     setOpenModal(true);
   };
@@ -75,9 +82,9 @@ export default function Servicios() {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          nombre: form.nombre,
-          descripcion: form.descripcion,
-          activo: form.activo ? 1 : 0
+          nombre: form.nombre.trim().toUpperCase(),
+          descripcion: form.descripcion.trim().toUpperCase(),
+          activo: Boolean(form.activo)
         })
       });
 
@@ -89,12 +96,57 @@ export default function Servicios() {
         setOpenModal(false);
         cargarServicios();
       } else {
-        setMensaje({ tipo: 'error', texto: 'Error al guardar el servicio' });
+        const data = await res.json();
+        setMensaje({ tipo: 'error', texto: data.error || 'Error al guardar el servicio' });
       }
     } catch {
       setMensaje({ tipo: 'error', texto: 'Error de conexión con el servidor' });
     }
   };
+
+  const handleEliminar = async (srv) => {
+    const confirmado = window.confirm(`¿Deseas dar de baja el servicio "${(srv.nombre || '').toUpperCase()}"?`);
+    if (!confirmado) return;
+
+    try {
+      const res = await fetch(`${API_URL}/servicios/${srv.idServicio}`, {
+        method: 'DELETE'
+      });
+
+      if (res.ok) {
+        setMensaje({ tipo: 'success', texto: 'Servicio dado de baja correctamente' });
+        cargarServicios();
+      } else {
+        const data = await res.json();
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo dar de baja el servicio' });
+      }
+    } catch {
+      setMensaje({ tipo: 'error', texto: 'Error de conexión con el servidor' });
+    }
+  };
+
+  const handleReactivar = async (srv) => {
+    try {
+      const res = await fetch(`${API_URL}/servicios/${srv.idServicio}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activo: true })
+      });
+
+      if (res.ok) {
+        setMensaje({ tipo: 'success', texto: 'Servicio reactivado correctamente' });
+        cargarServicios();
+      } else {
+        const data = await res.json();
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo reactivar el servicio' });
+      }
+    } catch {
+      setMensaje({ tipo: 'error', texto: 'Error de conexión con el servidor' });
+    }
+  };
+
+  const serviciosActivos = servicios.filter((s) => Boolean(s.activo));
+  const serviciosInactivos = servicios.filter((s) => !Boolean(s.activo));
 
   return (
     <MainCard
@@ -116,6 +168,71 @@ export default function Servicios() {
         </Alert>
       )}
 
+      <Typography variant="h4" sx={{ mb: 2 }}>
+        SERVICIOS ACTIVOS
+      </Typography>
+
+      <TableContainer component={Paper} variant="outlined" sx={{ mb: 4 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>
+                <strong>Código</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Nombre del Servicio</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Descripción</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Estado</strong>
+              </TableCell>
+              <TableCell align="right">
+                <strong>Acciones</strong>
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {serviciosActivos.map((s) => (
+              <TableRow key={s.idServicio}>
+                <TableCell>{`S-${s.idServicio}`}</TableCell>
+                <TableCell>{(s.nombre || '').toUpperCase()}</TableCell>
+                <TableCell>{(s.descripcion || '').toUpperCase()}</TableCell>
+                <TableCell>
+                  <Chip label="ACTIVO" color="success" size="small" />
+                </TableCell>
+                <TableCell align="right">
+                  <Tooltip title="Editar">
+                    <IconButton size="small" color="primary" onClick={() => abrirEditar(s)}>
+                      <IconEdit size={18} />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Dar de baja">
+                    <IconButton size="small" color="error" onClick={() => handleEliminar(s)}>
+                      <IconTrash size={18} />
+                    </IconButton>
+                  </Tooltip>
+                </TableCell>
+              </TableRow>
+            ))}
+            {serviciosActivos.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} align="center">
+                  No hay servicios activos en el catálogo.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <Divider sx={{ my: 3 }} />
+
+      <Typography variant="h4" sx={{ mb: 2 }}>
+        SERVICIOS DADOS DE BAJA
+      </Typography>
+
       <TableContainer component={Paper} variant="outlined">
         <Table size="small">
           <TableHead>
@@ -133,30 +250,32 @@ export default function Servicios() {
                 <strong>Estado</strong>
               </TableCell>
               <TableCell align="right">
-                <strong>Editar</strong>
+                <strong>Acciones</strong>
               </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {servicios.map((s) => (
-              <TableRow key={s.idServicio}>
+            {serviciosInactivos.map((s) => (
+              <TableRow key={s.idServicio} sx={{ opacity: 0.75 }}>
                 <TableCell>{`S-${s.idServicio}`}</TableCell>
-                <TableCell>{s.nombre}</TableCell>
-                <TableCell>{s.descripcion}</TableCell>
+                <TableCell>{(s.nombre || '').toUpperCase()}</TableCell>
+                <TableCell>{(s.descripcion || '').toUpperCase()}</TableCell>
                 <TableCell>
-                  <Chip label={s.activo === 1 ? 'Activo' : 'Inactivo'} color={s.activo === 1 ? 'success' : 'default'} size="small" />
+                  <Chip label="INACTIVO" color="default" size="small" />
                 </TableCell>
                 <TableCell align="right">
-                  <IconButton size="small" color="primary" onClick={() => abrirEditar(s)}>
-                    <IconEdit size={18} />
-                  </IconButton>
+                  <Tooltip title="Reactivar servicio">
+                    <IconButton size="small" color="success" onClick={() => handleReactivar(s)}>
+                      <IconRefresh size={18} />
+                    </IconButton>
+                  </Tooltip>
                 </TableCell>
               </TableRow>
             ))}
-            {servicios.length === 0 && (
+            {serviciosInactivos.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} align="center">
-                  No hay servicios registrados en el catálogo.
+                  No hay servicios dados de baja.
                 </TableCell>
               </TableRow>
             )}
@@ -175,14 +294,14 @@ export default function Servicios() {
                 label="Nombre del Servicio"
                 inputProps={{ maxLength: 30 }}
                 value={form.nombre}
-                onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+                onChange={(e) => setForm({ ...form, nombre: e.target.value.toUpperCase() })}
               />
               <TextField
                 fullWidth
                 label="Descripción Breve"
                 inputProps={{ maxLength: 50 }}
                 value={form.descripcion}
-                onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
+                onChange={(e) => setForm({ ...form, descripcion: e.target.value.toUpperCase() })}
               />
               <FormControlLabel
                 control={<Switch checked={form.activo} onChange={(e) => setForm({ ...form, activo: e.target.checked })} />}

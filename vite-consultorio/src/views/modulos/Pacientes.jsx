@@ -4,28 +4,65 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
+  FormControlLabel,
   Grid,
   IconButton,
   InputAdornment,
   MenuItem,
   Paper,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  TextField
+  TextField,
+  Tooltip,
+  Typography
 } from '@mui/material';
-import { IconArrowLeft, IconEdit, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconArrowLeft, IconEdit, IconPlus, IconRefresh, IconSearch, IconTrash } from '@tabler/icons-react';
 import MainCard from 'ui-component/cards/MainCard';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const CORREO_PUBLICO_GENERAL = 'publico.general@clinica.com';
+
+// Muestra primero Nombre(s), luego Apellido Paterno y Apellido Materno
+const formatearNombre = (persona) => {
+  if (!persona) return 'SIN ASIGNAR';
+  return `${persona.nombre || ''} ${persona.aPaterno || ''} ${persona.aMaterno || ''}`.trim().toUpperCase();
+};
+
+// Ordena alfabéticamente por Apellido Paterno, Apellido Materno y Nombre
+const ordenarPorApellidos = (lista) =>
+  [...lista].sort(
+    (a, b) =>
+      (a.aPaterno || '').localeCompare(b.aPaterno || '', 'es') ||
+      (a.aMaterno || '').localeCompare(b.aMaterno || '', 'es') ||
+      (a.nombre || '').localeCompare(b.nombre || '', 'es')
+  );
+
+const formatearTelefono = (valor) => {
+  const digitos = String(valor || '')
+    .replace(/\D/g, '')
+    .slice(0, 10);
+  if (digitos.length < 3) return digitos;
+  if (digitos.length === 3) {
+    return String(valor || '').endsWith(')') ? `(${digitos})` : digitos;
+  }
+  if (digitos.length <= 6) {
+    return `(${digitos.slice(0, 3)})${digitos.slice(3)}`;
+  }
+  return `(${digitos.slice(0, 3)})${digitos.slice(3, 6)}-${digitos.slice(6, 10)}`;
+};
 
 const estadoInicial = {
   nombre: '',
@@ -33,9 +70,11 @@ const estadoInicial = {
   aMaterno: '',
   edad: '',
   contactoTelefonico: '',
-  nombreFacturacion: '',
-  correoFacturacion: '',
-  idTerapeuta: ''
+  requiereFactura: false,
+  nombreFacturacion: 'PÚBLICO GENERAL',
+  correoFacturacion: CORREO_PUBLICO_GENERAL,
+  idTerapeuta: '',
+  activo: true
 };
 
 export default function Pacientes() {
@@ -52,8 +91,14 @@ export default function Pacientes() {
   const cargarDatos = async () => {
     try {
       const [resPac, resTer] = await Promise.all([fetch(`${API_URL}/pacientes`), fetch(`${API_URL}/terapeutas`)]);
-      if (resPac.ok) setPacientes(await resPac.json());
-      if (resTer.ok) setTerapeutas(await resTer.json());
+      if (resPac.ok) {
+        const dataPac = await resPac.json();
+        setPacientes(ordenarPorApellidos(dataPac));
+      }
+      if (resTer.ok) {
+        const dataTer = await resTer.json();
+        setTerapeutas(ordenarPorApellidos(dataTer));
+      }
     } catch (error) {
       console.error('Error al cargar pacientes:', error);
     }
@@ -70,32 +115,72 @@ export default function Pacientes() {
   };
 
   const abrirEditar = (paciente) => {
+    const reqFact = Boolean(paciente.requiereFactura);
     setEditandoId(paciente.idPaciente);
     setForm({
-      nombre: paciente.nombre,
-      aPaterno: paciente.aPaterno,
-      aMaterno: paciente.aMaterno,
+      nombre: (paciente.nombre || '').toUpperCase(),
+      aPaterno: (paciente.aPaterno || '').toUpperCase(),
+      aMaterno: (paciente.aMaterno || '').toUpperCase(),
       edad: paciente.edad,
-      contactoTelefonico: paciente.contactoTelefonico,
-      nombreFacturacion: paciente.nombreFacturacion,
-      correoFacturacion: paciente.correoFacturacion,
-      idTerapeuta: paciente.idTerapeuta
+      contactoTelefonico: formatearTelefono(paciente.contactoTelefonico),
+      requiereFactura: reqFact,
+      nombreFacturacion: reqFact ? (paciente.nombreFacturacion || '').toUpperCase() : 'PÚBLICO GENERAL',
+      correoFacturacion: reqFact ? paciente.correoFacturacion || '' : CORREO_PUBLICO_GENERAL,
+      idTerapeuta: paciente.idTerapeuta,
+      activo: Boolean(paciente.activo)
     });
     setOpenModal(true);
+  };
+
+  const handleToggleFactura = (checked) => {
+    if (!checked) {
+      setForm({
+        ...form,
+        requiereFactura: false,
+        nombreFacturacion: 'PÚBLICO GENERAL',
+        correoFacturacion: CORREO_PUBLICO_GENERAL
+      });
+    } else {
+      setForm({
+        ...form,
+        requiereFactura: true,
+        nombreFacturacion: form.nombreFacturacion === 'PÚBLICO GENERAL' ? '' : form.nombreFacturacion,
+        correoFacturacion: form.correoFacturacion === CORREO_PUBLICO_GENERAL ? '' : form.correoFacturacion
+      });
+    }
   };
 
   const handleGuardar = async (e) => {
     e.preventDefault();
     setMensaje({ tipo: '', texto: '' });
 
+    const telefonoLimpio = form.contactoTelefonico.replace(/\D/g, '');
+    if (telefonoLimpio.length !== 10) {
+      setMensaje({ tipo: 'error', texto: 'El teléfono debe tener exactamente 10 dígitos.' });
+      return;
+    }
+
     const url = editandoId ? `${API_URL}/pacientes/${editandoId}` : `${API_URL}/pacientes`;
     const method = editandoId ? 'PUT' : 'POST';
+
+    const payload = {
+      nombre: form.nombre.trim().toUpperCase(),
+      aPaterno: form.aPaterno.trim().toUpperCase(),
+      aMaterno: form.aMaterno.trim().toUpperCase(),
+      edad: Number(form.edad),
+      contactoTelefonico: telefonoLimpio,
+      requiereFactura: form.requiereFactura,
+      nombreFacturacion: form.requiereFactura ? form.nombreFacturacion.trim().toUpperCase() : 'PÚBLICO GENERAL',
+      correoFacturacion: form.requiereFactura ? form.correoFacturacion.trim().toLowerCase() : CORREO_PUBLICO_GENERAL,
+      idTerapeuta: Number(form.idTerapeuta),
+      activo: Boolean(form.activo)
+    };
 
     try {
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
 
@@ -115,10 +200,63 @@ export default function Pacientes() {
     }
   };
 
+  const handleEliminar = async (paciente) => {
+    const confirmado = window.confirm(`¿Deseas dar de baja al paciente ${formatearNombre(paciente)}?`);
+    if (!confirmado) return;
+
+    setMensaje({ tipo: '', texto: '' });
+    try {
+      const res = await fetch(`${API_URL}/pacientes/${paciente.idPaciente}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo dar de baja al paciente' });
+        return;
+      }
+
+      setMensaje({ tipo: 'success', texto: 'Paciente dado de baja correctamente' });
+      cargarDatos();
+    } catch {
+      setMensaje({ tipo: 'error', texto: 'Error de conexión al dar de baja al paciente' });
+    }
+  };
+
+  const handleReactivar = async (paciente) => {
+    const confirmado = window.confirm(`¿Deseas reactivar al paciente ${formatearNombre(paciente)}?`);
+    if (!confirmado) return;
+
+    setMensaje({ tipo: '', texto: '' });
+    try {
+      const res = await fetch(`${API_URL}/pacientes/${paciente.idPaciente}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activo: true })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo reactivar al paciente' });
+        return;
+      }
+
+      setMensaje({ tipo: 'success', texto: 'Paciente reactivado correctamente' });
+      cargarDatos();
+    } catch {
+      setMensaje({ tipo: 'error', texto: 'Error de conexión al reactivar al paciente' });
+    }
+  };
+
   const pacientesFiltrados = pacientes.filter((p) => {
-    const texto = `${p.codigo} ${p.nombre} ${p.aPaterno} ${p.aMaterno} ${p.contactoTelefonico}`.toLowerCase();
+    const telFormateado = formatearTelefono(p.contactoTelefonico);
+    const texto = `P-${p.idPaciente} ${p.nombre} ${p.aPaterno} ${p.aMaterno} ${p.contactoTelefonico} ${telFormateado}`.toLowerCase();
     return texto.includes(busqueda.toLowerCase());
   });
+
+  const pacientesActivos = pacientesFiltrados.filter((p) => p.activo !== false && p.activo !== 0);
+  const pacientesInactivos = pacientesFiltrados.filter((p) => p.activo === false || p.activo === 0);
+  const terapeutasActivos = terapeutas.filter((t) => t.activo !== false && t.activo !== 0);
 
   return (
     <MainCard
@@ -156,7 +294,11 @@ export default function Pacientes() {
         }}
       />
 
-      <TableContainer component={Paper} variant="outlined">
+      <Typography variant="h4" sx={{ mb: 2 }}>
+        PACIENTES ACTIVOS
+      </Typography>
+
+      <TableContainer component={Paper} variant="outlined" sx={{ mb: 4 }}>
         <Table size="small">
           <TableHead>
             <TableRow>
@@ -164,7 +306,13 @@ export default function Pacientes() {
                 <strong>Código</strong>
               </TableCell>
               <TableCell>
-                <strong>Paciente</strong>
+                <strong>Nombre(s)</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Paterno</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Materno</strong>
               </TableCell>
               <TableCell>
                 <strong>Edad</strong>
@@ -173,32 +321,135 @@ export default function Pacientes() {
                 <strong>Teléfono</strong>
               </TableCell>
               <TableCell>
+                <strong>Facturación</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Nombre de Facturación</strong>
+              </TableCell>
+              <TableCell>
                 <strong>Terapeuta Asignado</strong>
               </TableCell>
               <TableCell align="right">
-                <strong>Editar</strong>
+                <strong>Acciones</strong>
               </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {pacientesFiltrados.map((p) => (
+            {pacientesActivos.map((p) => (
               <TableRow key={p.idPaciente}>
                 <TableCell>{`P-${p.idPaciente}`}</TableCell>
-                <TableCell>{`${p.nombre} ${p.aPaterno} ${p.aMaterno}`}</TableCell>
-                <TableCell>{p.edad} años</TableCell>
-                <TableCell>{p.contactoTelefonico}</TableCell>
-                <TableCell>{p.terapeuta?.nombreCompleto || 'Sin asignar'}</TableCell>
+                <TableCell>{(p.nombre || '').toUpperCase()}</TableCell>
+                <TableCell>{(p.aPaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{(p.aMaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{p.edad} AÑOS</TableCell>
+                <TableCell>{formatearTelefono(p.contactoTelefonico)}</TableCell>
+                <TableCell>
+                  <Chip
+                    label={p.requiereFactura ? 'REQUIERE FACTURA' : 'PÚBLICO GENERAL'}
+                    color={p.requiereFactura ? 'info' : 'default'}
+                    size="small"
+                  />
+                </TableCell>
+                <TableCell>{(p.nombreFacturacion || 'PÚBLICO GENERAL').toUpperCase()}</TableCell>
+                <TableCell>{formatearNombre(p.terapeuta)}</TableCell>
                 <TableCell align="right">
-                  <IconButton size="small" color="primary" onClick={() => abrirEditar(p)}>
-                    <IconEdit size={18} />
-                  </IconButton>
+                  <Tooltip title="Editar">
+                    <IconButton size="small" color="primary" onClick={() => abrirEditar(p)}>
+                      <IconEdit size={18} />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Dar de baja">
+                    <IconButton size="small" color="error" onClick={() => handleEliminar(p)}>
+                      <IconTrash size={18} />
+                    </IconButton>
+                  </Tooltip>
                 </TableCell>
               </TableRow>
             ))}
-            {pacientesFiltrados.length === 0 && (
+            {pacientesActivos.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} align="center">
-                  No se encontraron pacientes.
+                <TableCell colSpan={10} align="center">
+                  No se encontraron pacientes activos.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <Divider sx={{ my: 3 }} />
+
+      <Typography variant="h4" sx={{ mb: 2 }}>
+        PACIENTES DADOS DE BAJA
+      </Typography>
+
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>
+                <strong>Código</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Nombre(s)</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Paterno</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Apellido Materno</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Edad</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Teléfono</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Facturación</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Nombre de Facturación</strong>
+              </TableCell>
+              <TableCell>
+                <strong>Terapeuta Asignado</strong>
+              </TableCell>
+              <TableCell align="right">
+                <strong>Acciones</strong>
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {pacientesInactivos.map((p) => (
+              <TableRow key={p.idPaciente} sx={{ opacity: 0.75 }}>
+                <TableCell>{`P-${p.idPaciente}`}</TableCell>
+                <TableCell>{(p.nombre || '').toUpperCase()}</TableCell>
+                <TableCell>{(p.aPaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{(p.aMaterno || '').toUpperCase()}</TableCell>
+                <TableCell>{p.edad} AÑOS</TableCell>
+                <TableCell>{formatearTelefono(p.contactoTelefonico)}</TableCell>
+                <TableCell>
+                  <Chip
+                    label={p.requiereFactura ? 'REQUIERE FACTURA' : 'PÚBLICO GENERAL'}
+                    color={p.requiereFactura ? 'info' : 'default'}
+                    size="small"
+                  />
+                </TableCell>
+                <TableCell>{(p.nombreFacturacion || 'PÚBLICO GENERAL').toUpperCase()}</TableCell>
+                <TableCell>{formatearNombre(p.terapeuta)}</TableCell>
+                <TableCell align="right">
+                  <Tooltip title="Reactivar paciente">
+                    <IconButton size="small" color="success" onClick={() => handleReactivar(p)}>
+                      <IconRefresh size={18} />
+                    </IconButton>
+                  </Tooltip>
+                </TableCell>
+              </TableRow>
+            ))}
+            {pacientesInactivos.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={10} align="center">
+                  No hay pacientes dados de baja.
                 </TableCell>
               </TableRow>
             )}
@@ -216,9 +467,9 @@ export default function Pacientes() {
                   fullWidth
                   required
                   label="Nombre(s)"
-                  inputProps={{ maxLength: 30 }}
+                  inputProps={{ maxLength: 60 }}
                   value={form.nombre}
-                  onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+                  onChange={(e) => setForm({ ...form, nombre: e.target.value.toUpperCase() })}
                 />
               </Grid>
               <Grid item xs={12} sm={4}>
@@ -226,9 +477,9 @@ export default function Pacientes() {
                   fullWidth
                   required
                   label="Apellido Paterno"
-                  inputProps={{ maxLength: 30 }}
+                  inputProps={{ maxLength: 60 }}
                   value={form.aPaterno}
-                  onChange={(e) => setForm({ ...form, aPaterno: e.target.value })}
+                  onChange={(e) => setForm({ ...form, aPaterno: e.target.value.toUpperCase() })}
                 />
               </Grid>
               <Grid item xs={12} sm={4}>
@@ -236,9 +487,9 @@ export default function Pacientes() {
                   fullWidth
                   required
                   label="Apellido Materno"
-                  inputProps={{ maxLength: 30 }}
+                  inputProps={{ maxLength: 60 }}
                   value={form.aMaterno}
-                  onChange={(e) => setForm({ ...form, aMaterno: e.target.value })}
+                  onChange={(e) => setForm({ ...form, aMaterno: e.target.value.toUpperCase() })}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -247,7 +498,7 @@ export default function Pacientes() {
                   required
                   type="number"
                   label="Edad"
-                  inputProps={{ min: 1, max: 120 }}
+                  inputProps={{ min: 0, max: 17, step: 1 }}
                   value={form.edad}
                   onChange={(e) => setForm({ ...form, edad: e.target.value })}
                 />
@@ -256,10 +507,10 @@ export default function Pacientes() {
                 <TextField
                   fullWidth
                   required
-                  label="Teléfono (10 dígitos)"
-                  inputProps={{ maxLength: 10 }}
+                  label="Teléfono"
+                  inputProps={{ maxLength: 13 }}
                   value={form.contactoTelefonico}
-                  onChange={(e) => setForm({ ...form, contactoTelefonico: e.target.value })}
+                  onChange={(e) => setForm({ ...form, contactoTelefonico: formatearTelefono(e.target.value) })}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -271,32 +522,50 @@ export default function Pacientes() {
                   value={form.idTerapeuta}
                   onChange={(e) => setForm({ ...form, idTerapeuta: e.target.value })}
                 >
-                  {terapeutas.map((t) => (
+                  {terapeutasActivos.map((t) => (
                     <MenuItem key={t.idTerapeuta} value={t.idTerapeuta}>
-                      {t.nombreCompleto} — {t.especialidad}
+                      {formatearNombre(t)} — {(t.especialidad || '').toUpperCase()}
                     </MenuItem>
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Nombre de Facturación"
-                  inputProps={{ maxLength: 50 }}
-                  value={form.nombreFacturacion}
-                  onChange={(e) => setForm({ ...form, nombreFacturacion: e.target.value })}
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={<Checkbox checked={form.requiereFactura} onChange={(e) => handleToggleFactura(e.target.checked)} />}
+                  label="¿Requiere factura?"
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
+                  required={form.requiereFactura}
+                  disabled={!form.requiereFactura}
+                  label="Nombre de facturación"
+                  inputProps={{ maxLength: 100 }}
+                  value={form.nombreFacturacion}
+                  onChange={(e) => setForm({ ...form, nombreFacturacion: e.target.value.toUpperCase() })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  required={form.requiereFactura}
+                  disabled={!form.requiereFactura}
                   type="email"
                   label="Correo de Facturación"
-                  inputProps={{ maxLength: 60 }}
+                  inputProps={{ maxLength: 80 }}
                   value={form.correoFacturacion}
-                  onChange={(e) => setForm({ ...form, correoFacturacion: e.target.value })}
+                  onChange={(e) => setForm({ ...form, correoFacturacion: e.target.value.toLowerCase() })}
                 />
               </Grid>
+              {editandoId && (
+                <Grid item xs={12}>
+                  <FormControlLabel
+                    control={<Switch checked={Boolean(form.activo)} onChange={(e) => setForm({ ...form, activo: e.target.checked })} />}
+                    label="Paciente activo"
+                  />
+                </Grid>
+              )}
             </Grid>
           </DialogContent>
           <DialogActions>

@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 
-// Obtener todos los pagos con la información de la cita y el paciente
 export const getPagos = async (req: Request, res: Response) => {
     try {
         const pagos = await prisma.pago.findMany({
@@ -38,7 +37,6 @@ export const getPagos = async (req: Request, res: Response) => {
     }
 };
 
-// Registrar un nuevo pago
 export const createPago = async (req: Request, res: Response) => {
     const { fecha, metodo, facturacion, idCita } = req.body;
 
@@ -51,7 +49,7 @@ export const createPago = async (req: Request, res: Response) => {
         const nuevoPago = await prisma.pago.create({
             data: {
                 fecha: fecha ? new Date(fecha) : new Date(),
-                metodo,
+                metodo: String(metodo).trim().toUpperCase(),
                 facturacion: facturacion ? 1 : 0,
                 idCita: Number(idCita)
             }
@@ -63,7 +61,6 @@ export const createPago = async (req: Request, res: Response) => {
     }
 };
 
-// Actualizar un pago existente
 export const updatePago = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const { fecha, metodo, facturacion, idCita } = req.body;
@@ -73,7 +70,7 @@ export const updatePago = async (req: Request, res: Response) => {
             where: { idPago: id },
             data: {
                 ...(fecha !== undefined && { fecha: new Date(fecha) }),
-                ...(metodo !== undefined && { metodo }),
+                ...(metodo !== undefined && { metodo: String(metodo).trim().toUpperCase() }),
                 ...(facturacion !== undefined && { facturacion: facturacion ? 1 : 0 }),
                 ...(idCita !== undefined && { idCita: Number(idCita) })
             }
@@ -85,7 +82,6 @@ export const updatePago = async (req: Request, res: Response) => {
     }
 };
 
-// Eliminar un pago
 export const deletePago = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
 

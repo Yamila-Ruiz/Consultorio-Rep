@@ -12,15 +12,15 @@ model cita {
   idCita             Int                @id @default(autoincrement())
   fecha              DateTime           @db.Date
   hora               DateTime           @db.Time(0)
-  estado             String             @db.VarChar(10)
+  estado             cita_estado        @default(AGENDADA)
   esPrimeraSesion    Int                @db.TinyInt
-  multaGenerada      Int                @db.TinyInt
   idPaciente         Int
   idSlot             Int
   idServicio         Int
   servicio           servicio           @relation(fields: [idServicio], references: [idServicio], onUpdate: Restrict, map: "FK_CIta_Servicio")
   paciente           paciente           @relation(fields: [idPaciente], references: [idPaciente], onUpdate: Restrict, map: "FK_Cita_Paciente")
   slotdisponibilidad slotdisponibilidad @relation(fields: [idSlot], references: [idSlot], onUpdate: Restrict, map: "FK_Cita_Slot")
+  multa              multa[]
   pago               pago[]
 
   @@index([idServicio], map: "FK_CIta_Servicio")
@@ -39,6 +39,8 @@ model paciente {
   correoFacturacion  String    @db.VarChar(60)
   fechaRegistro      DateTime  @db.Date
   idTerapeuta        Int
+  activo             Boolean   @default(true)
+  requiereFactura    Boolean   @default(false)
   cita               cita[]
   terapeuta          terapeuta @relation(fields: [idTerapeuta], references: [idTerapeuta], onUpdate: Restrict, map: "FK_Paciente_Terapeuta")
 
@@ -58,19 +60,19 @@ model pago {
 
 model recepcionista {
   idRecepcion        Int     @id @default(autoincrement())
-  nombreCompleto     String  @db.VarChar(60)
+  nombre             String  @db.VarChar(60)
+  aPaterno           String  @db.VarChar(60)
+  aMaterno           String  @db.VarChar(60)
   contactoTelefonico String  @db.VarChar(10)
-  idUsuario          Int
+  idUsuario          Int     @unique(map: "idUsuario")
   usuario            usuario @relation(fields: [idUsuario], references: [idUsuario], onUpdate: Restrict, map: "FK_Recepcion_Usuario")
-
-  @@index([idUsuario], map: "FK_Recepcion_Usuario")
 }
 
 model servicio {
-  idServicio  Int    @id @default(autoincrement())
-  nombre      String @db.VarChar(30)
-  descripcion String @db.VarChar(50)
-  activo      Int    @db.TinyInt
+  idServicio  Int     @id @default(autoincrement())
+  nombre      String  @db.VarChar(30)
+  descripcion String  @db.VarChar(50)
+  activo      Boolean @default(true)
   cita        cita[]
 }
 
@@ -89,21 +91,48 @@ model slotdisponibilidad {
 
 model terapeuta {
   idTerapeuta        Int                  @id @default(autoincrement())
-  nombreCompleto     String               @db.Text
+  nombre             String               @db.VarChar(60)
+  aPaterno           String               @db.VarChar(60)
+  aMaterno           String               @db.VarChar(60)
   contactoTelefonico String               @db.VarChar(10)
   especialidad       String               @db.VarChar(30)
-  idUsuario          Int
+  idUsuario          Int                  @unique(map: "idUsuario")
+  activo             Boolean              @default(true)
   paciente           paciente[]
   slotdisponibilidad slotdisponibilidad[]
   usuario            usuario              @relation(fields: [idUsuario], references: [idUsuario], onUpdate: Restrict, map: "FK_Terapeuta_Usuario")
-
-  @@index([idUsuario], map: "FK_Terapeuta_Usuario")
 }
 
 model usuario {
-  idUsuario     Int             @id @default(autoincrement())
-  nombreUsuario String          @db.VarChar(20)
-  contrasena    String          @db.VarChar(30)
-  recepcionista recepcionista[]
-  terapeuta     terapeuta[]
+  idUsuario     Int            @id @default(autoincrement())
+  nombreUsuario String         @db.VarChar(50)
+  contrasena    String         @db.VarChar(30)
+  recepcionista recepcionista?
+  terapeuta     terapeuta?
+}
+
+model multa {
+  idMulta         Int          @id @unique(map: "idMulta") @default(autoincrement())
+  idCita          Int
+  monto           Decimal      @db.Decimal(10, 2)
+  estado          multa_estado @default(PENDIENTE)
+  fechaGeneracion DateTime     @db.Date
+  fechaPago       DateTime?    @db.Date
+  cita            cita         @relation(fields: [idCita], references: [idCita], onUpdate: Restrict, map: "FK_Cita_Multa")
+
+  @@index([idCita], map: "FK_Cita_Multa")
+}
+
+enum cita_estado {
+  AGENDADA
+  CONFIRMADA
+  ATENDIDA
+  CANCELADA
+  INASISTENCIA
+}
+
+enum multa_estado {
+  PENDIENTE
+  PAGADA
+  CANCELADA
 }

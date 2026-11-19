@@ -31,7 +31,9 @@ export const getCitas = async (req: Request, res: Response) => {
                         terapeuta: {
                             select: {
                                 idTerapeuta: true,
-                                nombreCompleto: true,
+                                nombre: true,
+                                aPaterno: true,
+                                aMaterno: true,
                                 especialidad: true
                             }
                         }
@@ -103,7 +105,7 @@ export const createCita = async (req: Request, res: Response) => {
                 idPaciente: pacienteIdNumber,
                 fecha: fechaCita,
                 hora: horaCita,
-                estado: { not: 'Cancelada' }
+                estado: { not: 'CANCELADA' }
             }
         });
 
@@ -117,7 +119,7 @@ export const createCita = async (req: Request, res: Response) => {
                 data: {
                     fecha: fechaCita,
                     hora: horaCita,
-                    estado: (estado || 'Agendada').slice(0, 10),
+                    estado: (estado ? String(estado).trim().toUpperCase() : 'AGENDADA') as 'AGENDADA' | 'ATENDIDA' | 'CANCELADA',
                     esPrimeraSesion: esPrimeraSesion ? 1 : 0,
                     multaGenerada: multaGenerada ? 1 : 0,
                     idPaciente: pacienteIdNumber,
@@ -154,9 +156,10 @@ export const updateCita = async (req: Request, res: Response) => {
         idServicio
     } = req.body;
 
+    const estadoNormalizado = estado !== undefined ? String(estado).trim().toUpperCase() : undefined;
+
     try {
         const citaActualizada = await prisma.$transaction(async (tx) => {
-            // 1. Consultamos cómo estaba la cita antes de editarla
             const citaPrevia = await tx.cita.findUnique({ where: { idCita: id } });
 
             if (!citaPrevia) {
@@ -167,7 +170,6 @@ export const updateCita = async (req: Request, res: Response) => {
             let nuevaHora = hora !== undefined ? parseTime(hora) : undefined;
             const nuevoSlotId = idSlot !== undefined ? Number(idSlot) : undefined;
 
-            // 2. Si el usuario eligió un horario distinto al que ya tenía
             if (nuevoSlotId && nuevoSlotId !== citaPrevia.idSlot) {
                 const slotNuevo = await tx.slotdisponibilidad.findUnique({
                     where: { idSlot: nuevoSlotId }
@@ -177,11 +179,9 @@ export const updateCita = async (req: Request, res: Response) => {
                     throw new Error('SLOT_OCUPADO');
                 }
 
-                // Sincronizamos fecha y hora con las del nuevo horario elegido
                 nuevaFecha = slotNuevo.fecha;
                 nuevaHora = slotNuevo.inicio;
 
-                // Liberamos el horario viejo y ocupamos el nuevo
                 await tx.slotdisponibilidad.update({
                     where: { idSlot: citaPrevia.idSlot },
                     data: { estado: 1 }
@@ -192,13 +192,14 @@ export const updateCita = async (req: Request, res: Response) => {
                 });
             }
 
-            // 3. Actualizamos los datos de la cita
             const actualizada = await tx.cita.update({
                 where: { idCita: id },
                 data: {
                     ...(nuevaFecha !== undefined && { fecha: nuevaFecha }),
                     ...(nuevaHora !== undefined && { hora: nuevaHora }),
-                    ...(estado !== undefined && { estado: String(estado).slice(0, 10) }),
+                    ...(estadoNormalizado !== undefined && {
+                        estado: estadoNormalizado as 'AGENDADA' | 'ATENDIDA' | 'CANCELADA'
+                    }),
                     ...(esPrimeraSesion !== undefined && { esPrimeraSesion: esPrimeraSesion ? 1 : 0 }),
                     ...(multaGenerada !== undefined && { multaGenerada: multaGenerada ? 1 : 0 }),
                     ...(idPaciente !== undefined && { idPaciente: Number(idPaciente) }),
@@ -207,8 +208,7 @@ export const updateCita = async (req: Request, res: Response) => {
                 }
             });
 
-            // 4. Si la cita se canceló, liberamos el horario que tenía asignado
-            if (estado === 'Cancelada' && citaPrevia.estado !== 'Cancelada') {
+            if (estadoNormalizado === 'CANCELADA' && citaPrevia.estado !== 'CANCELADA') {
                 await tx.slotdisponibilidad.update({
                     where: { idSlot: actualizada.idSlot },
                     data: { estado: 1 }

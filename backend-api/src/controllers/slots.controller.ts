@@ -19,7 +19,9 @@ export const getSlots = async (req: Request, res: Response) => {
                 terapeuta: {
                     select: {
                         idTerapeuta: true,
-                        nombreCompleto: true,
+                        nombre: true,
+                        aPaterno: true,
+                        aMaterno: true,
                         especialidad: true
                     }
                 }
@@ -47,13 +49,11 @@ export const createSlot = async (req: Request, res: Response) => {
     const horaInicio = parseTime(inicio);
     const horaFin = parseTime(fin);
 
-    // 1. Validar rango lógico de horas
     if (horaInicio >= horaFin) {
         res.status(400).json({ error: 'Horario inválido: la hora de inicio debe ser anterior a la hora de fin' });
         return;
     }
 
-    // 2. Validar que no sea una fecha pasada (usando fecha local)
     const ahora = new Date();
     const hoyStr = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
     if (fecha < hoyStr) {
@@ -65,7 +65,6 @@ export const createSlot = async (req: Request, res: Response) => {
         const fechaDate = new Date(fecha);
         const terapeutaId = Number(idTerapeuta);
 
-        // 3. Validar que no exista un horario duplicado o traslapado para ese terapeuta en esa fecha
         const traslape = await prisma.slotdisponibilidad.findFirst({
             where: {
                 idTerapeuta: terapeutaId,

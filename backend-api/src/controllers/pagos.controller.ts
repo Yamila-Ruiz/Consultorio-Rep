@@ -50,7 +50,7 @@ export const createPago = async (req: Request, res: Response) => {
             data: {
                 fecha: fecha ? new Date(fecha) : new Date(),
                 metodo: String(metodo).trim().toUpperCase(),
-                facturacion: facturacion ? 1 : 0,
+                facturacion: Boolean(facturacion === true || facturacion === 1 || facturacion === 'true'),
                 idCita: Number(idCita)
             }
         });
@@ -71,7 +71,7 @@ export const updatePago = async (req: Request, res: Response) => {
             data: {
                 ...(fecha !== undefined && { fecha: new Date(fecha) }),
                 ...(metodo !== undefined && { metodo: String(metodo).trim().toUpperCase() }),
-                ...(facturacion !== undefined && { facturacion: facturacion ? 1 : 0 }),
+                ...(facturacion !== undefined && { facturacion: Boolean(facturacion === true || facturacion === 1 || facturacion === 'true')}),
                 ...(idCita !== undefined && { idCita: Number(idCita) })
             }
         });

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -27,10 +27,62 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { IconArrowLeft, IconClock, IconEdit, IconRefresh, IconTrash, IconUserPlus } from '@tabler/icons-react';
+import {
+  IconArrowLeft,
+  IconChevronLeft,
+  IconChevronRight,
+  IconClock,
+  IconEdit,
+  IconRefresh,
+  IconTrash,
+  IconUserPlus
+} from '@tabler/icons-react';
 import MainCard from 'ui-component/cards/MainCard';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+const MESES_ES = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre'
+];
+
+const DIAS_SEMANA_CORTO = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+
+// Forma en que se generan los hroarios
+const HORAS_INICIO_24H = Array.from({ length: 12 }, (_, i) => `${String(i + 9).padStart(2, '0')}:00`);
+
+// Calcula la hora de fin exactamente 1 hora después en formato 24 horas
+const calcularHoraFin24H = (horaInicio) => {
+  if (!horaInicio || !horaInicio.includes(':')) return '';
+  const [hStr, mStr] = horaInicio.split(':');
+  const hFin = Number(hStr) + 1;
+  return `${String(hFin).padStart(2, '0')}:${mStr}`;
+};
+
+// Obtiene fecha local YYYY-MM-DD
+const obtenerFechaLocalISO = (fecha = new Date()) => {
+  const year = fecha.getFullYear();
+  const month = String(fecha.getMonth() + 1).padStart(2, '0');
+  const day = String(fecha.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Obtiene la fecha de mañana en formato YYYY-MM-DD
+const obtenerMananaLocalISO = () => {
+  const manana = new Date();
+  manana.setDate(manana.getDate() + 1);
+  return obtenerFechaLocalISO(manana);
+};
 
 // Muestra primero Nombre(s), luego Apellido Paterno y Apellido Materno
 const formatearNombre = (persona) => {
@@ -52,19 +104,76 @@ const formatearTelefono = (valor) => {
   return `(${digitos.slice(0, 3)})${digitos.slice(3, 6)}-${digitos.slice(6, 10)}`;
 };
 
+// Ordena los horarios cronológicamente por fecha y hora de inicio
+const ordenarSlotsPorFechaYHora = (lista) =>
+  [...lista].sort((a, b) => {
+    const fechaA = a.fecha?.split('T')[0] || '';
+    const fechaB = b.fecha?.split('T')[0] || '';
+    if (fechaA !== fechaB) return fechaA.localeCompare(fechaB);
+    const inicioA = a.inicio?.split('T')[1] || '';
+    const inicioB = b.inicio?.split('T')[1] || '';
+    return inicioA.localeCompare(inicioB);
+  });
+
+// Formatea YYYY-MM-DD como "jueves 19 de noviembre de 2026"
+const formatearFechaLarga = (fechaISO) => {
+  if (!fechaISO) return '';
+  const soloFecha = fechaISO.split('T')[0];
+  const fechaObj = new Date(`${soloFecha}T12:00:00`);
+  return fechaObj.toLocaleDateString('es-MX', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+};
+
+// Genera las celdas de un mes (Lunes a Domingo)
+const generarCeldasMes = (anio, mes) => {
+  const primerDia = new Date(anio, mes, 1);
+  const offsetInicio = (primerDia.getDay() + 6) % 7;
+  const diasEnMes = new Date(anio, mes + 1, 0).getDate();
+
+  const celdas = [];
+  for (let i = 0; i < offsetInicio; i += 1) {
+    celdas.push(null);
+  }
+  for (let dia = 1; dia <= diasEnMes; dia += 1) {
+    const fechaISO = `${anio}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    celdas.push({ dia, fechaISO });
+  }
+  while (celdas.length % 7 !== 0) {
+    celdas.push(null);
+  }
+  return celdas;
+};
+
 export default function Terapeutas() {
   const navigate = useNavigate();
   const usuarioActual = JSON.parse(localStorage.getItem('usuario') || 'null');
   const esRecepcionista = usuarioActual?.rol === 'recepcionista';
+  const mananaISO = obtenerMananaLocalISO();
 
   const [terapeutas, setTerapeutas] = useState([]);
   const [slots, setSlots] = useState([]);
   const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
 
-  // Modal Registro de Usuario (Terapeuta / Recepcionista)
+  // Estados para el calendario interactivo de horarios
+  const [filtroSlotTerapeuta, setFiltroSlotTerapeuta] = useState('');
+  const [filtroSlotEstado, setFiltroSlotEstado] = useState('TODOS');
+  const [mesCalendarioSlots, setMesCalendarioSlots] = useState(() => {
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    return { anio: manana.getFullYear(), mes: manana.getMonth() };
+  });
+  const [diaSlotSeleccionado, setDiaSlotSeleccionado] = useState('');
+  const [anioMinSlots, mesMinSlots] = mananaISO.split('-').map(Number);
+  const esPrimerMesPermitido =
+    mesCalendarioSlots.anio < anioMinSlots || (mesCalendarioSlots.anio === anioMinSlots && mesCalendarioSlots.mes <= mesMinSlots - 1);
+
+  // Modal Registro de Terapeuta
   const [openRegistro, setOpenRegistro] = useState(false);
-  const [formUsuario, setFormUsuario] = useState({
-    rol: 'terapeuta',
+  const [formTerapeuta, setFormTerapeuta] = useState({
     nombre: '',
     aPaterno: '',
     aMaterno: '',
@@ -77,13 +186,12 @@ export default function Terapeutas() {
   const [openEditar, setOpenEditar] = useState(false);
   const [terapeutaEdit, setTerapeutaEdit] = useState(null);
 
-  // Modal Agregar Horario Disponible
+  // Modal Agregar Horario Disponible (predeterminado a mañana y bloques de 1 hora en 24h)
   const [openSlot, setOpenSlot] = useState(false);
   const [formSlot, setFormSlot] = useState({
     idTerapeuta: '',
-    fecha: new Date().toISOString().split('T')[0],
-    inicio: '09:00',
-    fin: '10:00'
+    fecha: obtenerMananaLocalISO(),
+    inicio: '09:00'
   });
 
   const cargarDatos = async () => {
@@ -99,7 +207,26 @@ export default function Terapeutas() {
         );
         setTerapeutas(dataTer);
       }
-      if (resSlots.ok) setSlots(await resSlots.json());
+      if (resSlots.ok) {
+        const dataSlots = await resSlots.json();
+        const filtradosInicial = ordenarSlotsPorFechaYHora(
+          dataSlots.filter((s) => {
+            const fechaSlot = s.fecha?.split('T')[0] || '';
+            const terapeutaActivo = s.terapeuta?.activo !== false && s.terapeuta?.activo !== 0;
+            return fechaSlot >= mananaISO && terapeutaActivo;
+          })
+        );
+        setSlots(filtradosInicial);
+
+        if (filtradosInicial.length > 0 && !diaSlotSeleccionado) {
+          const primeraFecha = filtradosInicial[0].fecha?.split('T')[0];
+          if (primeraFecha) {
+            const [anioStr, mesStr] = primeraFecha.split('-');
+            setMesCalendarioSlots({ anio: Number(anioStr), mes: Number(mesStr) - 1 });
+            setDiaSlotSeleccionado(primeraFecha);
+          }
+        }
+      }
     } catch (error) {
       console.error('Error al cargar terapeutas:', error);
     }
@@ -109,11 +236,11 @@ export default function Terapeutas() {
     cargarDatos();
   }, []);
 
-  const handleRegistrarUsuario = async (e) => {
+  const handleRegistrarTerapeuta = async (e) => {
     e.preventDefault();
     setMensaje({ tipo: '', texto: '' });
 
-    const telefonoLimpio = formUsuario.contactoTelefonico.replace(/\D/g, '');
+    const telefonoLimpio = formTerapeuta.contactoTelefonico.replace(/\D/g, '');
     if (telefonoLimpio.length !== 10) {
       setMensaje({ tipo: 'error', texto: 'El teléfono debe tener exactamente 10 dígitos.' });
       return;
@@ -124,28 +251,28 @@ export default function Terapeutas() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formUsuario,
-          nombre: formUsuario.nombre.trim().toUpperCase(),
-          aPaterno: formUsuario.aPaterno.trim().toUpperCase(),
-          aMaterno: formUsuario.aMaterno.trim().toUpperCase(),
-          especialidad: formUsuario.especialidad.trim().toUpperCase(),
-          contactoTelefonico: telefonoLimpio
+          rol: 'terapeuta',
+          nombre: formTerapeuta.nombre.trim().toUpperCase(),
+          aPaterno: formTerapeuta.aPaterno.trim().toUpperCase(),
+          aMaterno: formTerapeuta.aMaterno.trim().toUpperCase(),
+          especialidad: formTerapeuta.especialidad.trim().toUpperCase(),
+          contactoTelefonico: telefonoLimpio,
+          contrasena: formTerapeuta.contrasena
         })
       });
       const data = await res.json();
 
       if (!res.ok) {
-        setMensaje({ tipo: 'error', texto: data.error || 'Error al registrar usuario' });
+        setMensaje({ tipo: 'error', texto: data.error || 'Error al registrar terapeuta' });
         return;
       }
 
       setMensaje({
         tipo: 'success',
-        texto: `Usuario registrado correctamente. Usuario generado: ${data.nombreUsuario}`
+        texto: `Terapeuta registrado correctamente. Usuario generado: ${data.nombreUsuario}`
       });
       setOpenRegistro(false);
-      setFormUsuario({
-        rol: 'terapeuta',
+      setFormTerapeuta({
         nombre: '',
         aPaterno: '',
         aMaterno: '',
@@ -198,7 +325,7 @@ export default function Terapeutas() {
   };
 
   const handleEliminarTerapeuta = async (terapeuta) => {
-    const confirmado = window.confirm(`¿Deseas dar de baja al terapeuta ${formatearNombre(terapeuta)}?`);
+    const confirmado = window.confirm(`¿DESEA DAR DE BAJA AL TERAPEUTA ${formatearNombre(terapeuta)}?`);
     if (!confirmado) return;
 
     setMensaje({ tipo: '', texto: '' });
@@ -214,6 +341,10 @@ export default function Terapeutas() {
       }
 
       setMensaje({ tipo: 'success', texto: 'Terapeuta dado de baja correctamente' });
+      if (Number(filtroSlotTerapeuta) === Number(terapeuta.idTerapeuta)) {
+        setFiltroSlotTerapeuta('');
+      }
+      await cargarDatos();
       cargarDatos();
     } catch {
       setMensaje({ tipo: 'error', texto: 'Error de conexión al dar de baja al terapeuta' });
@@ -221,9 +352,6 @@ export default function Terapeutas() {
   };
 
   const handleReactivarTerapeuta = async (terapeuta) => {
-    const confirmado = window.confirm(`¿Deseas reactivar al terapeuta ${formatearNombre(terapeuta)}?`);
-    if (!confirmado) return;
-
     setMensaje({ tipo: '', texto: '' });
     try {
       const res = await fetch(`${API_URL}/terapeutas/${terapeuta.idTerapeuta}`, {
@@ -245,15 +373,40 @@ export default function Terapeutas() {
     }
   };
 
+  const abrirModalNuevoSlot = () => {
+    setFormSlot({
+      idTerapeuta: '',
+      fecha: obtenerMananaLocalISO(),
+      inicio: '09:00'
+    });
+    setOpenSlot(true);
+  };
+
   const handleCrearSlot = async (e) => {
     e.preventDefault();
     setMensaje({ tipo: '', texto: '' });
+
+    const fechaMinima = obtenerMananaLocalISO();
+    if (!formSlot.fecha || formSlot.fecha < fechaMinima) {
+      setMensaje({
+        tipo: 'error',
+        texto: 'Solo puedes registrar horarios a partir de mañana (no en el día actual ni fechas pasadas).'
+      });
+      return;
+    }
+
+    const horaFinCalculada = calcularHoraFin24H(formSlot.inicio);
 
     try {
       const res = await fetch(`${API_URL}/slots`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formSlot)
+        body: JSON.stringify({
+          idTerapeuta: formSlot.idTerapeuta,
+          fecha: formSlot.fecha,
+          inicio: formSlot.inicio,
+          fin: horaFinCalculada
+        })
       });
       const data = await res.json();
 
@@ -262,28 +415,133 @@ export default function Terapeutas() {
         return;
       }
 
-      setMensaje({ tipo: 'success', texto: 'Horario disponible agregado correctamente' });
+      setMensaje({
+        tipo: 'success',
+        texto: `Horario disponible agregado (${formSlot.inicio} - ${horaFinCalculada})`
+      });
       setOpenSlot(false);
+
+      const [anioStr, mesStr] = formSlot.fecha.split('-');
+      setMesCalendarioSlots({ anio: Number(anioStr), mes: Number(mesStr) - 1 });
+      setDiaSlotSeleccionado(formSlot.fecha);
+
       cargarDatos();
     } catch {
       setMensaje({ tipo: 'error', texto: 'Error de conexión al registrar horario' });
     }
   };
 
-  const terapeutasActivos = terapeutas.filter((t) => t.activo !== false && t.activo !== 0);
-  const terapeutasInactivos = terapeutas.filter((t) => t.activo === false || t.activo === 0);
+  const handleEliminarSlot = async (idSlot) => {
+    const confirmado = window.confirm('¿Deseas eliminar este horario disponible?');
+    if (!confirmado) return;
+
+    setMensaje({ tipo: '', texto: '' });
+    try {
+      const res = await fetch(`${API_URL}/slots/${idSlot}`, { method: 'DELETE' });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMensaje({ tipo: 'error', texto: data.error || 'No se pudo eliminar el horario' });
+        return;
+      }
+
+      setMensaje({ tipo: 'success', texto: 'Horario eliminado correctamente' });
+      cargarDatos();
+    } catch {
+      setMensaje({ tipo: 'error', texto: 'Error de conexión al eliminar horario' });
+    }
+  };
+
+  const handleCambiarFiltroTerapeuta = (idTerapeutaSeleccionado) => {
+    setFiltroSlotTerapeuta(idTerapeutaSeleccionado);
+
+    const slotsDelFiltro = ordenarSlotsPorFechaYHora(
+      slots.filter((s) => {
+        const fechaSlot = s.fecha?.split('T')[0] || '';
+        if (!fechaSlot || fechaSlot < mananaISO) return false;
+
+        const esDisponible = Boolean(s.estado);
+        const coincideTerapeuta = !idTerapeutaSeleccionado || Number(s.idTerapeuta) === Number(idTerapeutaSeleccionado);
+        const coincideEstado =
+          filtroSlotEstado === 'TODOS' ||
+          (filtroSlotEstado === 'DISPONIBLES' && esDisponible) ||
+          (filtroSlotEstado === 'OCUPADOS' && !esDisponible);
+        return coincideTerapeuta && coincideEstado;
+      })
+    );
+
+    if (slotsDelFiltro.length > 0) {
+      const primeraFecha = slotsDelFiltro[0].fecha?.split('T')[0];
+      if (primeraFecha) {
+        const [anioStr, mesStr] = primeraFecha.split('-');
+        setMesCalendarioSlots({ anio: Number(anioStr), mes: Number(mesStr) - 1 });
+        setDiaSlotSeleccionado(primeraFecha);
+      }
+    } else {
+      setDiaSlotSeleccionado('');
+    }
+  };
+
+  const cambiarMesSlots = (delta) => {
+    setMesCalendarioSlots((prev) => {
+      const nuevaFecha = new Date(prev.anio, prev.mes + delta, 1);
+      return { anio: nuevaFecha.getFullYear(), mes: nuevaFecha.getMonth() };
+    });
+  };
+
+  const terapeutasActivos = terapeutas.filter((t) => Boolean(t.activo));
+  const terapeutasInactivos = terapeutas.filter((t) => !Boolean(t.activo));
+
+  // Horarios filtrados (disponibles únicamente a partir de mañana) y ordenados cronológicamente
+  const slotsFiltrados = useMemo(
+    () =>
+      ordenarSlotsPorFechaYHora(
+        slots.filter((s) => {
+          const fechaSlot = s.fecha?.split('T')[0] || '';
+          const terapeutaActivo = s.terapeuta?.activo !== false && s.terapeuta?.activo !== 0;
+          if (!fechaSlot || fechaSlot < mananaISO || !terapeutaActivo) return false;
+
+          const esDisponible = Boolean(s.estado);
+          const coincideTerapeuta = !filtroSlotTerapeuta || Number(s.idTerapeuta) === Number(filtroSlotTerapeuta);
+          const coincideEstado =
+            filtroSlotEstado === 'TODOS' ||
+            (filtroSlotEstado === 'DISPONIBLES' && esDisponible) ||
+            (filtroSlotEstado === 'OCUPADOS' && !esDisponible);
+          return coincideTerapeuta && coincideEstado;
+        })
+      ),
+    [slots, filtroSlotTerapeuta, filtroSlotEstado, mananaISO]
+  );
+
+  const diasConSlots = useMemo(() => {
+    const mapaConteo = new Map();
+    slotsFiltrados.forEach((s) => {
+      const fechaKey = s.fecha?.split('T')[0];
+      if (fechaKey) {
+        mapaConteo.set(fechaKey, (mapaConteo.get(fechaKey) || 0) + 1);
+      }
+    });
+    return mapaConteo;
+  }, [slotsFiltrados]);
+
+  const slotsDelDiaSeleccionado = useMemo(() => {
+    if (!diaSlotSeleccionado) return [];
+    return slotsFiltrados.filter((s) => s.fecha?.split('T')[0] === diaSlotSeleccionado);
+  }, [slotsFiltrados, diaSlotSeleccionado]);
+
+  const celdasCalendarioSlots = useMemo(() => generarCeldasMes(mesCalendarioSlots.anio, mesCalendarioSlots.mes), [mesCalendarioSlots]);
 
   return (
     <MainCard
       title="Terapeutas y Disponibilidad"
       secondary={
         <Stack direction="row" spacing={1}>
-          <Button variant="outlined" color="primary" startIcon={<IconClock size={18} />} onClick={() => setOpenSlot(true)}>
+          <Button variant="outlined" color="primary" startIcon={<IconClock size={18} />} onClick={abrirModalNuevoSlot}>
             Agregar Horario
           </Button>
           {esRecepcionista && (
             <Button variant="contained" color="primary" startIcon={<IconUserPlus size={18} />} onClick={() => setOpenRegistro(true)}>
-              Registrar Usuario
+              Registrar Terapeuta
             </Button>
           )}
           <Button variant="outlined" size="small" startIcon={<IconArrowLeft size={16} />} onClick={() => navigate('/')}>
@@ -294,7 +552,7 @@ export default function Terapeutas() {
     >
       {!esRecepcionista && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Inicia sesión con una cuenta vinculada como <strong>Recepcionista</strong> para habilitar el alta de nuevos usuarios.
+          Inicia sesión con una cuenta vinculada como <strong>Recepcionista</strong> para habilitar el alta de nuevos terapeutas.
         </Alert>
       )}
 
@@ -456,80 +714,211 @@ export default function Terapeutas() {
 
       <Divider sx={{ my: 3 }} />
 
-      <Typography variant="h4" sx={{ mb: 2 }}>
-        Horarios de Disponibilidad Registrados
-      </Typography>
+      {/* Calendario de Horarios de Disponibilidad */}
+      <Stack
+        direction={{ xs: 'column', md: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'stretch', md: 'center' }}
+        spacing={2}
+        sx={{ mb: 2.5 }}
+      >
+        <Typography variant="h4">Horarios de Disponibilidad Registrados</Typography>
 
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>
-                <strong>Terapeuta</strong>
-              </TableCell>
-              <TableCell>
-                <strong>Fecha</strong>
-              </TableCell>
-              <TableCell>
-                <strong>Inicio</strong>
-              </TableCell>
-              <TableCell>
-                <strong>Fin</strong>
-              </TableCell>
-              <TableCell>
-                <strong>Estado</strong>
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {slots.map((s) => (
-              <TableRow key={s.idSlot}>
-                <TableCell>{formatearNombre(s.terapeuta)}</TableCell>
-                <TableCell>{s.fecha?.split('T')[0]}</TableCell>
-                <TableCell>{s.inicio?.split('T')[1]?.slice(0, 5)}</TableCell>
-                <TableCell>{s.fin?.split('T')[1]?.slice(0, 5)}</TableCell>
-                <TableCell>
-                  <Chip label={s.estado === 1 ? 'DISPONIBLE' : 'OCUPADO'} color={s.estado === 1 ? 'success' : 'default'} size="small" />
-                </TableCell>
-              </TableRow>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+          <TextField
+            select
+            size="small"
+            label="Terapeuta"
+            value={filtroSlotTerapeuta}
+            onChange={(e) => handleCambiarFiltroTerapeuta(e.target.value)}
+            sx={{ minWidth: 260 }}
+          >
+            <MenuItem value="">TODOS LOS TERAPEUTAS</MenuItem>
+            {terapeutasActivos.map((t) => (
+              <MenuItem key={t.idTerapeuta} value={t.idTerapeuta}>
+                {formatearNombre(t)}
+              </MenuItem>
             ))}
-            {slots.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} align="center">
-                  No hay horarios registrados. Usa &quot;Agregar Horario&quot; para habilitar bloques de citas.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+          </TextField>
 
-      {/* Modal: Registrar Nuevo Usuario (Solo Recepcionista) */}
+          <Stack direction="row" spacing={0.5}>
+            {['TODOS', 'DISPONIBLES', 'OCUPADOS'].map((estado) => (
+              <Chip
+                key={estado}
+                label={estado}
+                clickable
+                color={filtroSlotEstado === estado ? 'primary' : 'default'}
+                variant={filtroSlotEstado === estado ? 'filled' : 'outlined'}
+                onClick={() => setFiltroSlotEstado(estado)}
+              />
+            ))}
+          </Stack>
+        </Stack>
+      </Stack>
+
+      <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+        <Grid container spacing={3} alignItems="flex-start">
+          {/* Calendario Mensual */}
+          <Grid item xs={12} md={5}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, px: 1 }}>
+              <IconButton size="small" disabled={esPrimerMesPermitido} onClick={() => cambiarMesSlots(-1)}>
+                <IconChevronLeft size={18} />
+              </IconButton>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                {`${MESES_ES[mesCalendarioSlots.mes]} ${mesCalendarioSlots.anio}`}
+              </Typography>
+              <IconButton size="small" onClick={() => cambiarMesSlots(1)}>
+                <IconChevronRight size={18} />
+              </IconButton>
+            </Stack>
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.75, mb: 1 }}>
+              {DIAS_SEMANA_CORTO.map((letra, idx) => (
+                <Box key={`${letra}-${idx}`} sx={{ textAlign: 'center' }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>
+                    {letra}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.75 }}>
+              {celdasCalendarioSlots.map((celda, idx) => {
+                if (!celda) {
+                  return <Box key={`slot-empty-${idx}`} sx={{ height: 42 }} />;
+                }
+
+                const esAnteriorAManana = celda.fechaISO < mananaISO;
+                const cantidadHorarios = esAnteriorAManana ? 0 : diasConSlots.get(celda.fechaISO) || 0;
+                const tieneHorarios = !esAnteriorAManana && cantidadHorarios > 0;
+                const estaSeleccionado = !esAnteriorAManana && diaSlotSeleccionado === celda.fechaISO;
+
+                return (
+                  <Tooltip
+                    key={celda.fechaISO}
+                    title={tieneHorarios ? `${cantidadHorarios} horario(s) registrado(s)` : 'Sin horarios registrados'}
+                    arrow
+                  >
+                    <span>
+                      <Button
+                        fullWidth
+                        disabled={!tieneHorarios}
+                        onClick={() => setDiaSlotSeleccionado(celda.fechaISO)}
+                        sx={{
+                          minWidth: 0,
+                          height: 42,
+                          borderRadius: 2,
+                          fontWeight: tieneHorarios ? 700 : 400,
+                          bgcolor: estaSeleccionado ? 'primary.main' : tieneHorarios ? 'primary.lighter' : 'transparent',
+                          color: estaSeleccionado ? 'primary.contrastText' : tieneHorarios ? 'primary.dark' : 'text.disabled',
+                          '&:hover': {
+                            bgcolor: estaSeleccionado ? 'primary.dark' : tieneHorarios ? 'primary.light' : 'transparent'
+                          },
+                          '&.Mui-disabled': {
+                            color: 'text.disabled',
+                            bgcolor: 'transparent'
+                          }
+                        }}
+                      >
+                        {celda.dia}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                );
+              })}
+            </Box>
+          </Grid>
+
+          {/* Columna Derecha: Horarios del día seleccionado ordenados cronológicamente (24h) */}
+          <Grid item xs={12} md={7}>
+            {slotsFiltrados.length === 0 ? (
+              <Box sx={{ py: 4, textAlign: 'center' }}>
+                <Typography color="text.secondary">
+                  No hay horarios registrados a partir de mañana con los filtros seleccionados. Usa &quot;Agregar Horario&quot; para
+                  habilitar bloques de 1 hora.
+                </Typography>
+              </Box>
+            ) : !diaSlotSeleccionado || slotsDelDiaSeleccionado.length === 0 ? (
+              <Box sx={{ py: 4, textAlign: 'center' }}>
+                <Typography color="text.secondary">
+                  Elige un día marcado en el calendario para consultar los horarios ordenados por fecha y hora.
+                </Typography>
+              </Box>
+            ) : (
+              <Box>
+                <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }}>
+                  {`Horarios del ${formatearFechaLarga(diaSlotSeleccionado)}`}
+                </Typography>
+
+                <Grid container spacing={1.5}>
+                  {slotsDelDiaSeleccionado.map((s) => {
+                    const disponible = Boolean(s.estado);
+                    const horaInicio = s.inicio?.split('T')[1]?.slice(0, 5) || '';
+                    const horaFin = s.fin?.split('T')[1]?.slice(0, 5) || '';
+
+                    return (
+                      <Grid item xs={12} sm={6} key={s.idSlot}>
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 1.5,
+                            borderRadius: 2,
+                            border: '1px solid',
+                            borderColor: disponible ? 'success.main' : 'divider',
+                            bgcolor: disponible ? 'success.lighter' : 'action.hover'
+                          }}
+                        >
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
+                            <Stack direction="row" spacing={0.75} alignItems="center">
+                              <IconClock size={16} />
+                              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                                {`${horaInicio} - ${horaFin}`}
+                              </Typography>
+                            </Stack>
+
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              <Chip label={disponible ? 'DISPONIBLE' : 'OCUPADO'} color={disponible ? 'success' : 'default'} size="small" />
+                              {disponible && (
+                                <Tooltip title="Eliminar horario">
+                                  <IconButton size="small" color="error" onClick={() => handleEliminarSlot(s.idSlot)}>
+                                    <IconTrash size={16} />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                            </Stack>
+                          </Stack>
+
+                          <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+                            {formatearNombre(s.terapeuta)}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                            {(s.terapeuta?.especialidad || '').toUpperCase()}
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              </Box>
+            )}
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Modal: Registrar Nuevo Terapeuta */}
       <Dialog open={openRegistro} onClose={() => setOpenRegistro(false)} maxWidth="sm" fullWidth>
-        <Box component="form" onSubmit={handleRegistrarUsuario}>
-          <DialogTitle>Registrar Nuevo Usuario del Sistema</DialogTitle>
+        <Box component="form" onSubmit={handleRegistrarTerapeuta}>
+          <DialogTitle>Registrar nuevo terapeuta</DialogTitle>
           <DialogContent dividers>
             <Grid container spacing={2} sx={{ mt: 0.5 }}>
-              <Grid item xs={12}>
-                <TextField
-                  select
-                  fullWidth
-                  label="Rol del Usuario"
-                  value={formUsuario.rol}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, rol: e.target.value })}
-                >
-                  <MenuItem value="terapeuta">TERAPEUTA</MenuItem>
-                  <MenuItem value="recepcionista">RECEPCIONISTA</MenuItem>
-                </TextField>
-              </Grid>
               <Grid item xs={12} sm={4}>
                 <TextField
                   fullWidth
                   required
                   label="Nombre(s)"
                   inputProps={{ maxLength: 60 }}
-                  value={formUsuario.nombre}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, nombre: e.target.value.toUpperCase() })}
+                  value={formTerapeuta.nombre}
+                  onChange={(e) => setFormTerapeuta({ ...formTerapeuta, nombre: e.target.value.toUpperCase() })}
                 />
               </Grid>
               <Grid item xs={12} sm={4}>
@@ -538,8 +927,8 @@ export default function Terapeutas() {
                   required
                   label="Apellido Paterno"
                   inputProps={{ maxLength: 60 }}
-                  value={formUsuario.aPaterno}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, aPaterno: e.target.value.toUpperCase() })}
+                  value={formTerapeuta.aPaterno}
+                  onChange={(e) => setFormTerapeuta({ ...formTerapeuta, aPaterno: e.target.value.toUpperCase() })}
                 />
               </Grid>
               <Grid item xs={12} sm={4}>
@@ -548,8 +937,8 @@ export default function Terapeutas() {
                   required
                   label="Apellido Materno"
                   inputProps={{ maxLength: 60 }}
-                  value={formUsuario.aMaterno}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, aMaterno: e.target.value.toUpperCase() })}
+                  value={formTerapeuta.aMaterno}
+                  onChange={(e) => setFormTerapeuta({ ...formTerapeuta, aMaterno: e.target.value.toUpperCase() })}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -558,32 +947,29 @@ export default function Terapeutas() {
                   required
                   label="Teléfono"
                   inputProps={{ maxLength: 13 }}
-                  value={formUsuario.contactoTelefonico}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, contactoTelefonico: formatearTelefono(e.target.value) })}
+                  value={formTerapeuta.contactoTelefonico}
+                  onChange={(e) => setFormTerapeuta({ ...formTerapeuta, contactoTelefonico: formatearTelefono(e.target.value) })}
                 />
               </Grid>
-              {formUsuario.rol === 'terapeuta' && (
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    fullWidth
-                    required
-                    label="Especialidad"
-                    inputProps={{ maxLength: 30 }}
-                    value={formUsuario.especialidad}
-                    onChange={(e) => setFormUsuario({ ...formUsuario, especialidad: e.target.value.toUpperCase() })}
-                  />
-                </Grid>
-              )}
-              <Grid item xs={12} sm={formUsuario.rol === 'terapeuta' ? 12 : 6}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  required
+                  label="Especialidad"
+                  inputProps={{ maxLength: 30 }}
+                  value={formTerapeuta.especialidad}
+                  onChange={(e) => setFormTerapeuta({ ...formTerapeuta, especialidad: e.target.value.toUpperCase() })}
+                />
+              </Grid>
+              <Grid item xs={12}>
                 <TextField
                   fullWidth
                   required
                   type="password"
                   label="Contraseña"
                   inputProps={{ maxLength: 30 }}
-                  value={formUsuario.contrasena}
-                  onChange={(e) => setFormUsuario({ ...formUsuario, contrasena: e.target.value })}
-                  helperText="El usuario se creará automáticamente como ROL + PRIMER NOMBRE (en mayúsculas)"
+                  value={formTerapeuta.contrasena}
+                  onChange={(e) => setFormTerapeuta({ ...formTerapeuta, contrasena: e.target.value })}
                 />
               </Grid>
             </Grid>
@@ -591,7 +977,7 @@ export default function Terapeutas() {
           <DialogActions>
             <Button onClick={() => setOpenRegistro(false)}>Cancelar</Button>
             <Button type="submit" variant="contained">
-              Guardar Usuario
+              Guardar Terapeuta
             </Button>
           </DialogActions>
         </Box>
@@ -665,7 +1051,7 @@ export default function Terapeutas() {
         )}
       </Dialog>
 
-      {/* Modal: Agregar Horario Disponible */}
+      {/* Agregar Horario Disponible permitiendo fechas a partir del día siguiente */}
       <Dialog open={openSlot} onClose={() => setOpenSlot(false)} maxWidth="xs" fullWidth>
         <Box component="form" onSubmit={handleCrearSlot}>
           <DialogTitle>Agregar Horario Disponible</DialogTitle>
@@ -685,33 +1071,34 @@ export default function Terapeutas() {
                   </MenuItem>
                 ))}
               </TextField>
+
               <TextField
                 fullWidth
                 required
                 type="date"
                 label="Fecha"
                 InputLabelProps={{ shrink: true }}
+                inputProps={{ min: mananaISO }}
                 value={formSlot.fecha}
                 onChange={(e) => setFormSlot({ ...formSlot, fecha: e.target.value })}
               />
+
               <TextField
+                select
                 fullWidth
                 required
-                type="time"
                 label="Hora de Inicio"
-                InputLabelProps={{ shrink: true }}
                 value={formSlot.inicio}
                 onChange={(e) => setFormSlot({ ...formSlot, inicio: e.target.value })}
-              />
-              <TextField
-                fullWidth
-                required
-                type="time"
-                label="Hora de Fin"
-                InputLabelProps={{ shrink: true }}
-                value={formSlot.fin}
-                onChange={(e) => setFormSlot({ ...formSlot, fin: e.target.value })}
-              />
+              >
+                {HORAS_INICIO_24H.map((hora) => (
+                  <MenuItem key={hora} value={hora}>
+                    {hora}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              <TextField fullWidth disabled label="Hora de Fin" value={calcularHoraFin24H(formSlot.inicio)} />
             </Stack>
           </DialogContent>
           <DialogActions>

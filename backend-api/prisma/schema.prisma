@@ -10,10 +10,8 @@ datasource db {
 
 model cita {
   idCita             Int                @id @default(autoincrement())
-  fecha              DateTime           @db.Date
-  hora               DateTime           @db.Time(0)
   estado             cita_estado        @default(AGENDADA)
-  esPrimeraSesion    Int                @db.TinyInt
+  esPrimeraSesion    Boolean            @default(false)
   idPaciente         Int
   idSlot             Int
   idServicio         Int
@@ -51,7 +49,7 @@ model pago {
   idPago      Int      @id @default(autoincrement())
   fecha       DateTime @db.Date
   metodo      String   @db.VarChar(30)
-  facturacion Int      @db.TinyInt
+  facturacion Boolean  @default(false)
   idCita      Int
   cita        cita     @relation(fields: [idCita], references: [idCita], onUpdate: Restrict, map: "FK_Pago_Cita")
 
@@ -81,7 +79,7 @@ model slotdisponibilidad {
   inicio      DateTime  @db.Time(0)
   fin         DateTime  @db.Time(0)
   fecha       DateTime  @db.Date
-  estado      Int       @db.TinyInt
+  estado      Boolean   @default(true)
   idTerapeuta Int
   cita        cita[]
   terapeuta   terapeuta @relation(fields: [idTerapeuta], references: [idTerapeuta], onUpdate: Restrict, map: "FK_Slot_Terapeuta")

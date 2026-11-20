@@ -1,20 +1,46 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 
-const parseTime = (timeValue: string): Date => {
-    if (timeValue.includes('T')) return new Date(timeValue);
-    const normalized = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
-    return new Date(`1970-01-01T${normalized}Z`);
+// Elimina automáticamente los horarios DISPONIBLES (no ocupados) cuya fecha y hora ya pasaron
+const eliminarSlotsDisponiblesVencidos = async () => {
+    const ahora = new Date();
+    const hoyUTC = new Date(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()));
+    const horaActualUTC = new Date(Date.UTC(1970, 0, 1, ahora.getHours(), ahora.getMinutes(), ahora.getSeconds()));
+
+    await prisma.slotdisponibilidad.deleteMany({
+        where: {
+            estado: true,
+            cita: { none: {} },
+            OR: [
+                { fecha: { lt: hoyUTC } },
+                {
+                    fecha: hoyUTC,
+                    inicio: { lte: horaActualUTC }
+                }
+            ]
+        }
+    });
 };
 
+// Obtener horarios posteriores al día actual, ordenados por fecha y hora de inicio
 export const getSlots = async (req: Request, res: Response) => {
-    const { idTerapeuta } = req.query;
-
     try {
+        await eliminarSlotsDisponiblesVencidos();
+
+        const ahora = new Date();
+        const mananaUTC = new Date(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 1));
+
         const slots = await prisma.slotdisponibilidad.findMany({
             where: {
-                ...(idTerapeuta && { idTerapeuta: Number(idTerapeuta) })
+                fecha: { gte: mananaUTC },
+                terapeuta: {
+                    activo: true
+                }
             },
+            orderBy: [
+                { fecha: 'asc' },
+                { inicio: 'asc' }
+            ],
             include: {
                 terapeuta: {
                     select: {
@@ -22,63 +48,96 @@ export const getSlots = async (req: Request, res: Response) => {
                         nombre: true,
                         aPaterno: true,
                         aMaterno: true,
-                        especialidad: true
+                        especialidad: true,
+                        activo: true
                     }
                 }
-            },
-            orderBy: [
-                { fecha: 'asc' },
-                { inicio: 'asc' }
-            ]
+            }
         });
         res.json(slots);
     } catch (error) {
-        console.error('Error al obtener slots:', error);
-        res.status(500).json({ error: 'Error al obtener los horarios disponibles' });
+        console.error('Error al obtener horarios:', error);
+        res.status(500).json({ error: 'Error al obtener la lista de horarios' });
     }
 };
 
+// Registrar nuevo espacio disponible de 1 hora (a partir de mañana)
 export const createSlot = async (req: Request, res: Response) => {
-    const { inicio, fin, fecha, estado, idTerapeuta } = req.body;
-
-    if (!inicio || !fin || !fecha || !idTerapeuta) {
-        res.status(400).json({ error: 'Debes indicar terapeuta, fecha, hora de inicio y hora de fin' });
+    const { idTerapeuta, fecha, inicio } = req.body;
+    if (!idTerapeuta || !fecha || !inicio) {
+        res.status(400).json({ error: 'Terapeuta, fecha y hora de inicio son obligatorios.' });
         return;
     }
 
-    const horaInicio = parseTime(inicio);
-    const horaFin = parseTime(fin);
+    // ---> PEGA ESTO AQUÍ (antes de validar traslapes y de prisma.slotdisponibilidad.create) <---
+    const terapeuta = await prisma.terapeuta.findFirst({
+        where: {
+            idTerapeuta: Number(idTerapeuta),
+            activo: true
+        }
+    });
 
-    if (horaInicio >= horaFin) {
-        res.status(400).json({ error: 'Horario inválido: la hora de inicio debe ser anterior a la hora de fin' });
+    if (!terapeuta) {
+        res.status(400).json({ error: 'El terapeuta seleccionado no existe o está dado de baja.' });
         return;
     }
 
+    const terapeutaId = Number(idTerapeuta);
+    if (!terapeutaId || !fecha || !inicio) {
+        res.status(400).json({ error: 'Terapeuta, fecha y hora de inicio son obligatorios.' });
+        return;
+    }
+
+    const partesFecha = String(fecha).split('-').map(Number);
+    if (partesFecha.length !== 3 || partesFecha.some(Number.isNaN)) {
+        res.status(400).json({ error: 'Formato de fecha inválido.' });
+        return;
+    }
+
+    const [anio, mes, dia] = partesFecha;
+    const fechaDate = new Date(Date.UTC(anio, mes - 1, dia));
     const ahora = new Date();
-    const hoyStr = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
-    if (fecha < hoyStr) {
-        res.status(400).json({ error: 'Horario inválido: no puedes registrar disponibilidad en una fecha pasada' });
+    const mananaUTC = new Date(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 1));
+
+    if (fechaDate < mananaUTC) {
+        res.status(400).json({
+            error: 'Solo se permiten registrar horarios a partir de mañana (no en el día actual ni fechas pasadas).'
+        });
         return;
     }
+
+    const matchHora = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(inicio).trim());
+    if (!matchHora) {
+        res.status(400).json({ error: 'La hora de inicio debe estar en formato de 24 horas (HH:mm).' });
+        return;
+    }
+
+    const horas = Number(matchHora[1]);
+    const minutos = Number(matchHora[2]);
+
+    if (horas > 22) {
+        res.status(400).json({ error: 'La hora máxima de inicio es 22:00 para completar un bloque de 1 hora.' });
+        return;
+    }
+
+    const horaInicio = new Date(Date.UTC(1970, 0, 1, horas, minutos, 0));
+    const horaFin = new Date(Date.UTC(1970, 0, 1, horas + 1, minutos, 0));
 
     try {
-        const fechaDate = new Date(fecha);
-        const terapeutaId = Number(idTerapeuta);
+        await eliminarSlotsDisponiblesVencidos();
 
         const traslape = await prisma.slotdisponibilidad.findFirst({
             where: {
                 idTerapeuta: terapeutaId,
                 fecha: fechaDate,
-                AND: [
-                    { inicio: { lt: horaFin } },
-                    { fin: { gt: horaInicio } }
-                ]
+                inicio: { lt: horaFin },
+                fin: { gt: horaInicio }
             }
         });
 
         if (traslape) {
             res.status(409).json({
-                error: 'Horario duplicado o traslapado: el terapeuta ya tiene un bloque registrado en ese rango de horas'
+                error: 'El terapeuta ya tiene un horario registrado que se cruza con ese bloque de 1 hora.'
             });
             return;
         }
@@ -88,49 +147,108 @@ export const createSlot = async (req: Request, res: Response) => {
                 inicio: horaInicio,
                 fin: horaFin,
                 fecha: fechaDate,
-                estado: estado !== undefined ? Number(estado) : 1,
+                estado: true,
                 idTerapeuta: terapeutaId
             }
         });
+
         res.status(201).json(nuevoSlot);
     } catch (error) {
-        console.error('Error al crear slot:', error);
+        console.error('Error al crear horario:', error);
         res.status(500).json({ error: 'Error al registrar el horario disponible' });
     }
 };
 
+// Actualizar estado o datos de un horario
 export const updateSlot = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    const { inicio, fin, fecha, estado, idTerapeuta } = req.body;
+    const { estado, fecha, inicio, idTerapeuta } = req.body;
 
     try {
+        const slotActual = await prisma.slotdisponibilidad.findUnique({
+            where: { idSlot: id }
+        });
+
+        if (!slotActual) {
+            res.status(404).json({ error: 'El horario no existe.' });
+            return;
+        }
+
+        let fechaDate: Date | undefined;
+        if (fecha !== undefined) {
+            const partesFecha = String(fecha).split('-').map(Number);
+            if (partesFecha.length !== 3 || partesFecha.some(Number.isNaN)) {
+                res.status(400).json({ error: 'Formato de fecha inválido.' });
+                return;
+            }
+            const [anio, mes, dia] = partesFecha;
+            fechaDate = new Date(Date.UTC(anio, mes - 1, dia));
+        }
+
+        let horaInicio: Date | undefined;
+        let horaFin: Date | undefined;
+        if (inicio !== undefined) {
+            const matchHora = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(inicio).trim());
+            if (!matchHora) {
+                res.status(400).json({ error: 'La hora de inicio debe estar en formato de 24 horas (HH:mm).' });
+                return;
+            }
+            const horas = Number(matchHora[1]);
+            const minutos = Number(matchHora[2]);
+            if (horas > 22) {
+                res.status(400).json({ error: 'La hora máxima de inicio es 22:00.' });
+                return;
+            }
+            horaInicio = new Date(Date.UTC(1970, 0, 1, horas, minutos, 0));
+            horaFin = new Date(Date.UTC(1970, 0, 1, horas + 1, minutos, 0));
+        }
+
         const slotActualizado = await prisma.slotdisponibilidad.update({
             where: { idSlot: id },
             data: {
-                ...(inicio !== undefined && { inicio: parseTime(inicio) }),
-                ...(fin !== undefined && { fin: parseTime(fin) }),
-                ...(fecha !== undefined && { fecha: new Date(fecha) }),
-                ...(estado !== undefined && { estado: Number(estado) }),
+                ...(estado !== undefined && {
+                    estado: Boolean(estado === true || estado === 1 || estado === 'true')
+                }),
+                ...(fechaDate !== undefined && { fecha: fechaDate }),
+                ...(horaInicio !== undefined && { inicio: horaInicio }),
+                ...(horaFin !== undefined && { fin: horaFin }),
                 ...(idTerapeuta !== undefined && { idTerapeuta: Number(idTerapeuta) })
             }
         });
+
         res.json(slotActualizado);
     } catch (error) {
-        console.error('Error al actualizar slot:', error);
+        console.error('Error al actualizar horario:', error);
         res.status(500).json({ error: 'Error al actualizar el horario' });
     }
 };
 
+// Eliminar un horario disponible (solo si no está ocupado)
 export const deleteSlot = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
 
     try {
+        const slot = await prisma.slotdisponibilidad.findUnique({
+            where: { idSlot: id }
+        });
+
+        if (!slot) {
+            res.status(404).json({ error: 'El horario no existe.' });
+            return;
+        }
+
+        if (!slot.estado) {
+            res.status(409).json({ error: 'No se puede eliminar un horario que ya está ocupado por una cita.' });
+            return;
+        }
+
         await prisma.slotdisponibilidad.delete({
             where: { idSlot: id }
         });
+
         res.json({ mensaje: 'Horario eliminado correctamente' });
     } catch (error) {
-        console.error('Error al eliminar slot:', error);
-        res.status(500).json({ error: 'No se pudo eliminar el horario (verifica si ya tiene una cita asignada)' });
+        console.error('Error al eliminar horario:', error);
+        res.status(500).json({ error: 'No se pudo eliminar el horario' });
     }
 };

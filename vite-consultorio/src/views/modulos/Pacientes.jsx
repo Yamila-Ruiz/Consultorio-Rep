@@ -29,7 +29,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { IconArrowLeft, IconEdit, IconPlus, IconRefresh, IconSearch, IconTrash } from '@tabler/icons-react';
+import { IconArrowLeft, IconCheck, IconEdit, IconPlus, IconRefresh, IconSearch, IconTrash, IconX } from '@tabler/icons-react';
 import MainCard from 'ui-component/cards/MainCard';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
@@ -320,7 +320,7 @@ export default function Pacientes() {
               <TableCell>
                 <strong>Teléfono</strong>
               </TableCell>
-              <TableCell>
+              <TableCell align="center">
                 <strong>Facturación</strong>
               </TableCell>
               <TableCell>
@@ -349,6 +349,17 @@ export default function Pacientes() {
                     color={p.requiereFactura ? 'info' : 'default'}
                     size="small"
                   />
+                </TableCell>
+                <TableCell align="center">
+                  <Tooltip title={p.requiereFactura ? 'Requiere factura' : 'Público general'}>
+                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {p.requiereFactura ? (
+                        <IconCheck size={20} color="#2e7d32" stroke={2.5} />
+                      ) : (
+                        <IconX size={20} color="#d32f2f" stroke={2.5} />
+                      )}
+                    </Box>
+                  </Tooltip>
                 </TableCell>
                 <TableCell>{(p.nombreFacturacion || 'PÚBLICO GENERAL').toUpperCase()}</TableCell>
                 <TableCell>{formatearNombre(p.terapeuta)}</TableCell>
@@ -405,7 +416,7 @@ export default function Pacientes() {
               <TableCell>
                 <strong>Teléfono</strong>
               </TableCell>
-              <TableCell>
+              <TableCell align={'center'}>
                 <strong>Facturación</strong>
               </TableCell>
               <TableCell>
@@ -434,6 +445,17 @@ export default function Pacientes() {
                     color={p.requiereFactura ? 'info' : 'default'}
                     size="small"
                   />
+                </TableCell>
+                <TableCell align="center">
+                  <Tooltip title={p.requiereFactura ? 'Requiere factura' : 'Público general'}>
+                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {p.requiereFactura ? (
+                        <IconCheck size={20} color="#2e7d32" stroke={2.5} />
+                      ) : (
+                        <IconX size={20} color="#d32f2f" stroke={2.5} />
+                      )}
+                    </Box>
+                  </Tooltip>
                 </TableCell>
                 <TableCell>{(p.nombreFacturacion || 'PÚBLICO GENERAL').toUpperCase()}</TableCell>
                 <TableCell>{formatearNombre(p.terapeuta)}</TableCell>
@@ -513,7 +535,7 @@ export default function Pacientes() {
                   onChange={(e) => setForm({ ...form, contactoTelefonico: formatearTelefono(e.target.value) })}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sx={{ width: '100%' }}>
                 <TextField
                   select
                   fullWidth
@@ -522,6 +544,9 @@ export default function Pacientes() {
                   value={form.idTerapeuta}
                   onChange={(e) => setForm({ ...form, idTerapeuta: e.target.value })}
                 >
+                  <MenuItem value="" disabled>
+                    SELECCIONA UN TERAPEUTA
+                  </MenuItem>
                   {terapeutasActivos.map((t) => (
                     <MenuItem key={t.idTerapeuta} value={t.idTerapeuta}>
                       {formatearNombre(t)} — {(t.especialidad || '').toUpperCase()}

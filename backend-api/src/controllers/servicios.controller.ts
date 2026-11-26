@@ -1,5 +1,13 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
+import { isNonEmptyString, parsePathId } from '../utils/requestValidation';
+
+const isValidPrice = (value: unknown): value is number =>
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    value <= 99_999_999.99 &&
+    Math.abs(value * 100 - Math.round(value * 100)) < 1e-8;
 
 // Consulta el catálogo completo; activos=true permite solicitar solo servicios disponibles para agendar.
 export const getServicios = async (req: Request, res: Response) => {
@@ -17,23 +25,25 @@ export const getServicios = async (req: Request, res: Response) => {
 
 // Registra un servicio con precio obligatorio, que será la fuente del monto de sus pagos futuros.
 export const createServicio = async (req: Request, res: Response) => {
-    const { nombre, descripcion, precio, activo } = req.body;
-    const nombreLimpio = typeof nombre === 'string' ? nombre.trim().toUpperCase() : '';
-    const descripcionLimpia = typeof descripcion === 'string' ? descripcion.trim().toUpperCase() : '';
-    const precioNumero = Number(precio);
+    const { nombre, descripcion, precio, activo } = req.body as Record<string, unknown>;
 
-    if (!nombreLimpio || nombreLimpio.length > 30) return void res.status(400).json({ error: 'El nombre es obligatorio y no debe superar 30 caracteres' });
-    if (descripcionLimpia.length > 50) return void res.status(400).json({ error: 'La descripción no debe superar 50 caracteres' });
-    if (!Number.isFinite(precioNumero) || precioNumero <= 0 || Math.round(precioNumero * 100) !== precioNumero * 100) {
-        return void res.status(400).json({ error: 'El precio debe ser mayor que cero y tener máximo dos decimales' });
+    if (!isNonEmptyString(nombre, 30)) return void res.status(400).json({ error: 'El nombre debe ser texto y no superar 30 caracteres' });
+    if (descripcion !== undefined && (typeof descripcion !== 'string' || descripcion.trim().length > 50)) {
+        return void res.status(400).json({ error: 'La descripción debe ser texto y no superar 50 caracteres' });
+    }
+    if (!isValidPrice(precio)) {
+        return void res.status(400).json({ error: 'El precio debe ser mayor que cero, no superar 99,999,999.99 y tener máximo dos decimales' });
     }
     if (activo !== undefined && typeof activo !== 'boolean') return void res.status(400).json({ error: 'El estado activo debe ser booleano' });
+
+    const nombreLimpio = nombre.trim().toUpperCase();
+    const descripcionLimpia = typeof descripcion === 'string' ? descripcion.trim().toUpperCase() : '';
 
     try {
         const existente = await prisma.servicio.findFirst({ where: { nombre: nombreLimpio } });
         if (existente) return void res.status(409).json({ error: 'Ya existe un servicio con ese nombre' });
         const servicio = await prisma.servicio.create({
-            data: { nombre: nombreLimpio, descripcion: descripcionLimpia, precio: precioNumero, activo: activo ?? true }
+            data: { nombre: nombreLimpio, descripcion: descripcionLimpia, precio, activo: activo ?? true }
         });
         res.status(201).json(servicio);
     } catch (error) {
@@ -44,29 +54,27 @@ export const createServicio = async (req: Request, res: Response) => {
 
 // Actualiza únicamente los campos recibidos; cambiar el precio no altera pagos históricos.
 export const updateServicio = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: 'Identificador de servicio inválido' });
-    const { nombre, descripcion, precio, activo } = req.body;
+    const id = parsePathId(req.params.id);
+    if (id === null) return void res.status(400).json({ error: 'Identificador de servicio inválido' });
+    const { nombre, descripcion, precio, activo } = req.body as Record<string, unknown>;
     try {
         const actual = await prisma.servicio.findUnique({ where: { idServicio: id } });
         if (!actual) return void res.status(404).json({ error: 'No se encontró el servicio' });
         const data: any = {};
         if (nombre !== undefined) {
-            const value = typeof nombre === 'string' ? nombre.trim().toUpperCase() : '';
-            if (!value || value.length > 30) return void res.status(400).json({ error: 'El nombre es obligatorio y no debe superar 30 caracteres' });
+            if (!isNonEmptyString(nombre, 30)) return void res.status(400).json({ error: 'El nombre debe ser texto y no superar 30 caracteres' });
+            const value = nombre.trim().toUpperCase();
             const duplicado = await prisma.servicio.findFirst({ where: { nombre: value, NOT: { idServicio: id } } });
             if (duplicado) return void res.status(409).json({ error: 'Ya existe otro servicio con ese nombre' });
             data.nombre = value;
         }
         if (descripcion !== undefined) {
-            const value = typeof descripcion === 'string' ? descripcion.trim().toUpperCase() : '';
-            if (value.length > 50) return void res.status(400).json({ error: 'La descripción no debe superar 50 caracteres' });
-            data.descripcion = value;
+            if (typeof descripcion !== 'string' || descripcion.trim().length > 50) return void res.status(400).json({ error: 'La descripción debe ser texto y no superar 50 caracteres' });
+            data.descripcion = descripcion.trim().toUpperCase();
         }
         if (precio !== undefined) {
-            const value = Number(precio);
-            if (!Number.isFinite(value) || value <= 0 || Math.round(value * 100) !== value * 100) return void res.status(400).json({ error: 'El precio debe ser mayor que cero y tener máximo dos decimales' });
-            data.precio = value;
+            if (!isValidPrice(precio)) return void res.status(400).json({ error: 'El precio debe ser un número mayor que cero, no superar 99,999,999.99 y tener máximo dos decimales' });
+            data.precio = precio;
         }
         if (activo !== undefined) {
             if (typeof activo !== 'boolean') return void res.status(400).json({ error: 'El estado activo debe ser booleano' });
@@ -83,8 +91,8 @@ export const updateServicio = async (req: Request, res: Response) => {
 
 // Da de baja lógicamente el servicio para conservar las citas que lo utilizaron.
 export const deleteServicio = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: 'Identificador de servicio inválido' });
+    const id = parsePathId(req.params.id);
+    if (id === null) return void res.status(400).json({ error: 'Identificador de servicio inválido' });
     try {
         const actual = await prisma.servicio.findUnique({ where: { idServicio: id } });
         if (!actual) return void res.status(404).json({ error: 'No se encontró el servicio' });

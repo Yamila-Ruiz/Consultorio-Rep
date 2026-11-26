@@ -1,48 +1,19 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 
-// Monto predeterminado de multa cuando una cita pasa a INASISTENCIA
-const MONTO_MULTA_INASISTENCIA = 200.0;
+const MONTO_MULTA_INASISTENCIA = 200;
 
-// Obtener todas las citas con datos de paciente, servicio, multa y slot/terapeuta
-export const getCitas = async (req: Request, res: Response) => {
+// Devuelve citas con paciente, precio del servicio, multa y terapeuta del horario.
+export const getCitas = async (_req: Request, res: Response) => {
     try {
         const citas = await prisma.cita.findMany({
-            orderBy: [
-                { slotdisponibilidad: { fecha: 'asc' } },
-                { slotdisponibilidad: { inicio: 'asc' } }
-            ],
+            orderBy: [{ slotdisponibilidad: { fecha: 'asc' } }, { slotdisponibilidad: { inicio: 'asc' } }],
             include: {
-                paciente: {
-                    select: {
-                        idPaciente: true,
-                        nombre: true,
-                        aPaterno: true,
-                        aMaterno: true,
-                        contactoTelefonico: true
-                    }
-                },
-                servicio: {
-                    select: {
-                        idServicio: true,
-                        nombre: true
-                    }
-                },
+                paciente: { select: { idPaciente: true, nombre: true, aPaterno: true, aMaterno: true, contactoTelefonico: true, idTerapeuta: true } },
+                servicio: true,
                 multa: true,
-                slotdisponibilidad: {
-                    include: {
-                        terapeuta: {
-                            select: {
-                                idTerapeuta: true,
-                                nombre: true,
-                                aPaterno: true,
-                                aMaterno: true,
-                                especialidad: true,
-                                activo: true
-                            }
-                        }
-                    }
-                }
+                pago: true,
+                slotdisponibilidad: { include: { terapeuta: { select: { idTerapeuta: true, nombre: true, aPaterno: true, aMaterno: true, especialidad: true, activo: true } } } }
             }
         });
         res.json(citas);
@@ -52,176 +23,111 @@ export const getCitas = async (req: Request, res: Response) => {
     }
 };
 
-// Agendar una nueva cita y marcar el slot como ocupado (estado = false)
+// Agenda una cita y reserva el slot en una transacción.
 export const createCita = async (req: Request, res: Response) => {
     const { idPaciente, idServicio, idSlot, esPrimeraSesion } = req.body;
-
-    if (!idPaciente || !idServicio || !idSlot) {
+    const pacienteId = Number(idPaciente);
+    const servicioId = Number(idServicio);
+    const slotId = Number(idSlot);
+    if (![pacienteId, servicioId, slotId].every((n) => Number.isInteger(n) && n > 0)) {
         res.status(400).json({ error: 'Paciente, servicio y horario disponible son obligatorios.' });
         return;
     }
-
     try {
         const nuevaCita = await prisma.$transaction(async (tx) => {
-            const slot = await tx.slotdisponibilidad.findUnique({
-                where: { idSlot: Number(idSlot) }
+            const [paciente, servicio, slot] = await Promise.all([
+                tx.paciente.findUnique({ where: { idPaciente: pacienteId } }),
+                tx.servicio.findUnique({ where: { idServicio: servicioId } }),
+                tx.slotdisponibilidad.findUnique({ where: { idSlot: slotId } })
+            ]);
+            if (!paciente || !paciente.activo) throw new Error('PACIENTE_INACTIVO');
+            if (!servicio || !servicio.activo) throw new Error('SERVICIO_INACTIVO');
+            if (!slot) throw new Error('SLOT_NO_EXISTE');
+            if (!slot.estado) throw new Error('SLOT_OCUPADO');
+            const terapeuta = await tx.terapeuta.findUnique({ where: { idTerapeuta: slot.idTerapeuta } });
+            if (!terapeuta || !terapeuta.activo) throw new Error('TERAPEUTA_INACTIVO');
+            if (Number(paciente.idTerapeuta) !== Number(slot.idTerapeuta)) throw new Error('TERAPEUTA_NO_ASIGNADO');
+
+            const duplicada = await tx.cita.findFirst({
+                where: { idPaciente: pacienteId, estado: { not: 'CANCELADA' }, slotdisponibilidad: { fecha: slot.fecha, inicio: slot.inicio } }
             });
+            if (duplicada) throw new Error('CITA_DUPLICADA');
 
-            if (!slot) {
-                throw new Error('SLOT_NO_EXISTE');
-            }
-
-            if (!slot.estado) {
-                throw new Error('SLOT_OCUPADO');
-            }
-
-            // Evitar que el mismo paciente tenga otra cita activa el mismo día y hora
-            const citaDuplicada = await tx.cita.findFirst({
-                where: {
-                    idPaciente: Number(idPaciente),
-                    estado: { not: 'CANCELADA' },
-                    slotdisponibilidad: {
-                        fecha: slot.fecha,
-                        inicio: slot.inicio
-                    }
-                }
-            });
-
-            if (citaDuplicada) {
-                throw new Error('CITA_DUPLICADA');
-            }
-
-            const citaCreada = await tx.cita.create({
-                data: {
-                    idPaciente: Number(idPaciente),
-                    idServicio: Number(idServicio),
-                    idSlot: Number(idSlot),
-                    esPrimeraSesion: Boolean(esPrimeraSesion),
-                    estado: 'AGENDADA'
-                }
-            });
-
-            await tx.slotdisponibilidad.update({
-                where: { idSlot: Number(idSlot) },
-                data: { estado: false }
-            });
-
-            return citaCreada;
+            const reservado = await tx.slotdisponibilidad.updateMany({ where: { idSlot: slotId, estado: true }, data: { estado: false } });
+            if (reservado.count !== 1) throw new Error('SLOT_OCUPADO');
+            return tx.cita.create({ data: { idPaciente: pacienteId, idServicio: servicioId, idSlot: slotId, esPrimeraSesion: esPrimeraSesion === true || esPrimeraSesion === 'true', estado: 'AGENDADA' } });
         });
-
         res.status(201).json(nuevaCita);
-    } catch (error: unknown) {
-        if (error instanceof Error) {
-            if (error.message === 'SLOT_NO_EXISTE') {
-                res.status(404).json({ error: 'El horario seleccionado no existe.' });
-                return;
-            }
-            if (error.message === 'SLOT_OCUPADO') {
-                res.status(409).json({ error: 'Este horario ya fue ocupado por otra cita.' });
-                return;
-            }
-            if (error.message === 'CITA_DUPLICADA') {
-                res.status(409).json({ error: 'El paciente ya tiene una cita agendada en esa misma fecha y hora.' });
-                return;
-            }
-        }
+    } catch (error) {
+        const mensajes: Record<string, [number, string]> = {
+            PACIENTE_INACTIVO: [400, 'El paciente no existe o está inactivo.'],
+            SERVICIO_INACTIVO: [400, 'El servicio no existe o está inactivo.'],
+            SLOT_NO_EXISTE: [404, 'El horario seleccionado no existe.'],
+            SLOT_OCUPADO: [409, 'Este horario ya fue ocupado por otra cita.'],
+            TERAPEUTA_INACTIVO: [400, 'El terapeuta del horario está inactivo.'],
+            TERAPEUTA_NO_ASIGNADO: [400, 'El horario no corresponde al terapeuta asignado al paciente.'],
+            CITA_DUPLICADA: [409, 'El paciente ya tiene una cita en esa fecha y hora.']
+        };
+        if (error instanceof Error && mensajes[error.message]) return void res.status(mensajes[error.message][0]).json({ error: mensajes[error.message][1] });
         console.error('Error al agendar cita:', error);
         res.status(500).json({ error: 'Error interno al agendar la cita' });
     }
 };
 
-// Actualizar estado de una cita (libera slot en CANCELADA y registra multa en INASISTENCIA)
+// Cambia el estado; la multa fija se crea solo al pasar de CONFIRMADA a INASISTENCIA.
 export const updateCita = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    const { estado, esPrimeraSesion, idServicio, montoMulta } = req.body;
+    const { estado, esPrimeraSesion, idServicio } = req.body;
+    const estados = ['AGENDADA', 'CONFIRMADA', 'ATENDIDA', 'CANCELADA', 'INASISTENCIA'];
+    if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: 'Identificador de cita inválido' });
+    const estadoNuevo = estado === undefined ? undefined : String(estado).trim().toUpperCase();
+    if (estadoNuevo !== undefined && !estados.includes(estadoNuevo)) return void res.status(400).json({ error: 'Estado de cita inválido' });
 
     try {
-        const citaActualizada = await prisma.$transaction(async (tx) => {
-            const citaActual = await tx.cita.findUnique({
-                where: { idCita: id }
-            });
-
-            if (!citaActual) {
-                throw new Error('CITA_NO_EXISTE');
+        const actualizada = await prisma.$transaction(async (tx) => {
+            const actual = await tx.cita.findUnique({ where: { idCita: id } });
+            if (!actual) throw new Error('CITA_NO_EXISTE');
+            if (estadoNuevo === 'INASISTENCIA' && actual.estado !== 'CONFIRMADA') throw new Error('INASISTENCIA_REQUIERE_CONFIRMACION');
+            if (estadoNuevo === 'CANCELADA' && actual.estado !== 'CANCELADA') {
+                await tx.slotdisponibilidad.update({ where: { idSlot: actual.idSlot }, data: { estado: true } });
             }
-
-            const estadoNuevo = estado ? String(estado).trim().toUpperCase() : undefined;
-
-            // Si se cancela la cita, liberar el slot para que vuelva a estar disponible
-            if (estadoNuevo === 'CANCELADA' && citaActual.estado !== 'CANCELADA') {
-                await tx.slotdisponibilidad.update({
-                    where: { idSlot: citaActual.idSlot },
-                    data: { estado: true }
-                });
+            if (estadoNuevo === 'INASISTENCIA') {
+                const multa = await tx.multa.findFirst({ where: { idCita: id } });
+                if (!multa) await tx.multa.create({ data: { idCita: id, monto: MONTO_MULTA_INASISTENCIA, estado: 'PENDIENTE', fechaGeneracion: new Date() } });
             }
-
-            // Si pasa a INASISTENCIA, generar registro en la tabla multa si aún no tiene una
-            if (estadoNuevo === 'INASISTENCIA' && citaActual.estado !== 'INASISTENCIA') {
-                const multaExistente = await tx.multa.findFirst({
-                    where: { idCita: id }
-                });
-
-                if (!multaExistente) {
-                    await tx.multa.create({
-                        data: {
-                            idCita: id,
-                            monto: montoMulta !== undefined ? Number(montoMulta) : MONTO_MULTA_INASISTENCIA,
-                            estado: 'PENDIENTE',
-                            fechaGeneracion: new Date()
-                        }
-                    });
-                }
-            }
-
             return tx.cita.update({
                 where: { idCita: id },
                 data: {
-                    ...(estadoNuevo !== undefined && { estado: estadoNuevo as any }),
-                    ...(esPrimeraSesion !== undefined && { esPrimeraSesion: Boolean(esPrimeraSesion) }),
-                    ...(idServicio !== undefined && { idServicio: Number(idServicio) })
+                    ...(estadoNuevo !== undefined ? { estado: estadoNuevo as any } : {}),
+                    ...(esPrimeraSesion !== undefined ? { esPrimeraSesion: esPrimeraSesion === true || esPrimeraSesion === 'true' } : {}),
+                    ...(idServicio !== undefined ? { idServicio: Number(idServicio) } : {})
                 }
             });
         });
-
-        res.json(citaActualizada);
-    } catch (error: unknown) {
-        if (error instanceof Error && error.message === 'CITA_NO_EXISTE') {
-            res.status(404).json({ error: 'La cita no existe.' });
-            return;
-        }
+        res.json(actualizada);
+    } catch (error) {
+        if (error instanceof Error && error.message === 'CITA_NO_EXISTE') return void res.status(404).json({ error: 'La cita no existe.' });
+        if (error instanceof Error && error.message === 'INASISTENCIA_REQUIERE_CONFIRMACION') return void res.status(400).json({ error: 'Primero debe estar CONFIRMADA para generar la multa por inasistencia.' });
         console.error('Error al actualizar cita:', error);
         res.status(500).json({ error: 'Error al actualizar la cita' });
     }
 };
 
-// Cancelar cita y liberar horario
+// Cancela una cita y libera el horario sin eliminar el historial.
 export const deleteCita = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-
     try {
         await prisma.$transaction(async (tx) => {
             const cita = await tx.cita.findUnique({ where: { idCita: id } });
-            if (!cita) {
-                throw new Error('CITA_NO_EXISTE');
+            if (!cita) throw new Error('CITA_NO_EXISTE');
+            if (cita.estado !== 'CANCELADA') {
+                await tx.cita.update({ where: { idCita: id }, data: { estado: 'CANCELADA' } });
+                await tx.slotdisponibilidad.update({ where: { idSlot: cita.idSlot }, data: { estado: true } });
             }
-
-            await tx.cita.update({
-                where: { idCita: id },
-                data: { estado: 'CANCELADA' }
-            });
-
-            await tx.slotdisponibilidad.update({
-                where: { idSlot: cita.idSlot },
-                data: { estado: true }
-            });
         });
-
         res.json({ mensaje: 'Cita cancelada y horario liberado correctamente' });
-    } catch (error: unknown) {
-        if (error instanceof Error && error.message === 'CITA_NO_EXISTE') {
-            res.status(404).json({ error: 'La cita no existe.' });
-            return;
-        }
+    } catch (error) {
+        if (error instanceof Error && error.message === 'CITA_NO_EXISTE') return void res.status(404).json({ error: 'La cita no existe.' });
         console.error('Error al cancelar cita:', error);
         res.status(500).json({ error: 'No se pudo cancelar la cita' });
     }

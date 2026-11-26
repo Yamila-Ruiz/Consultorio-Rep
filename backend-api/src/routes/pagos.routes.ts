@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
     getPagos,
-    createPago,
+    registrarPago,
     updatePago,
     deletePago
 } from '../controllers/pagos.controller';
@@ -9,7 +9,7 @@ import {
 const router = Router();
 
 router.get('/', getPagos);
-router.post('/', createPago);
+router.post('/', registrarPago);
 router.put('/:id', updatePago);
 router.delete('/:id', deletePago);
 

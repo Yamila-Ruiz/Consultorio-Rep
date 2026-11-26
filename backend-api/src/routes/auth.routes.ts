@@ -10,6 +10,7 @@ import {
 const router = Router();
 
 router.post('/login', login);
+router.post('/registrar', registrarUsuario);
 router.post('/registro', registrarUsuario);
 router.get('/usuarios', getUsuarios);
 router.put('/usuarios/:id', updateUsuario);

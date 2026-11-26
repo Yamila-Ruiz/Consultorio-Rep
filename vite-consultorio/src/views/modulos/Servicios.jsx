@@ -37,7 +37,7 @@ export default function Servicios() {
 
   const [openModal, setOpenModal] = useState(false);
   const [editandoId, setEditandoId] = useState(null);
-  const [form, setForm] = useState({ nombre: '', descripcion: '', activo: true });
+  const [form, setForm] = useState({ nombre: '', descripcion: '', precio: '', activo: true });
 
   const cargarServicios = async () => {
     try {
@@ -58,7 +58,7 @@ export default function Servicios() {
 
   const abrirNuevo = () => {
     setEditandoId(null);
-    setForm({ nombre: '', descripcion: '', activo: true });
+    setForm({ nombre: '', descripcion: '', precio: '', activo: true });
     setOpenModal(true);
   };
 
@@ -67,6 +67,7 @@ export default function Servicios() {
     setForm({
       nombre: (srv.nombre || '').toUpperCase(),
       descripcion: (srv.descripcion || '').toUpperCase(),
+      precio: String(srv.precio ?? ''),
       activo: Boolean(srv.activo)
     });
     setOpenModal(true);
@@ -84,6 +85,7 @@ export default function Servicios() {
         body: JSON.stringify({
           nombre: form.nombre.trim().toUpperCase(),
           descripcion: form.descripcion.trim().toUpperCase(),
+          precio: Number(form.precio),
           activo: Boolean(form.activo)
         })
       });
@@ -185,6 +187,9 @@ export default function Servicios() {
               <TableCell>
                 <strong>Descripción</strong>
               </TableCell>
+              <TableCell align="right">
+                <strong>Precio</strong>
+              </TableCell>
               <TableCell>
                 <strong>Estado</strong>
               </TableCell>
@@ -199,6 +204,7 @@ export default function Servicios() {
                 <TableCell>{`S-${s.idServicio}`}</TableCell>
                 <TableCell>{(s.nombre || '').toUpperCase()}</TableCell>
                 <TableCell>{(s.descripcion || '').toUpperCase()}</TableCell>
+                <TableCell align="right">${Number(s.precio || 0).toFixed(2)}</TableCell>
                 <TableCell>
                   <Chip label="ACTIVO" color="success" size="small" />
                 </TableCell>
@@ -218,7 +224,7 @@ export default function Servicios() {
             ))}
             {serviciosActivos.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} align="center">
+                <TableCell colSpan={6} align="center">
                   No hay servicios activos en el catálogo.
                 </TableCell>
               </TableRow>
@@ -246,6 +252,9 @@ export default function Servicios() {
               <TableCell>
                 <strong>Descripción</strong>
               </TableCell>
+              <TableCell align="right">
+                <strong>Precio</strong>
+              </TableCell>
               <TableCell>
                 <strong>Estado</strong>
               </TableCell>
@@ -260,6 +269,7 @@ export default function Servicios() {
                 <TableCell>{`S-${s.idServicio}`}</TableCell>
                 <TableCell>{(s.nombre || '').toUpperCase()}</TableCell>
                 <TableCell>{(s.descripcion || '').toUpperCase()}</TableCell>
+                <TableCell align="right">${Number(s.precio || 0).toFixed(2)}</TableCell>
                 <TableCell>
                   <Chip label="INACTIVO" color="default" size="small" />
                 </TableCell>
@@ -274,7 +284,7 @@ export default function Servicios() {
             ))}
             {serviciosInactivos.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} align="center">
+                <TableCell colSpan={6} align="center">
                   No hay servicios dados de baja.
                 </TableCell>
               </TableRow>
@@ -295,6 +305,15 @@ export default function Servicios() {
                 inputProps={{ maxLength: 30 }}
                 value={form.nombre}
                 onChange={(e) => setForm({ ...form, nombre: e.target.value.toUpperCase() })}
+              />
+              <TextField
+                fullWidth
+                required
+                type="number"
+                label="Precio del servicio"
+                inputProps={{ min: 0.01, step: 0.01 }}
+                value={form.precio}
+                onChange={(e) => setForm({ ...form, precio: e.target.value })}
               />
               <TextField
                 fullWidth

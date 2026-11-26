@@ -9,7 +9,7 @@ datasource db {
 }
 
 model cita {
-  idCita             Int                @id @default(autoincrement())
+  idCita             Int                @id @unique @default(autoincrement())
   estado             cita_estado        @default(AGENDADA)
   esPrimeraSesion    Boolean            @default(false)
   idPaciente         Int
@@ -19,7 +19,7 @@ model cita {
   paciente           paciente           @relation(fields: [idPaciente], references: [idPaciente], onUpdate: Restrict, map: "FK_Cita_Paciente")
   slotdisponibilidad slotdisponibilidad @relation(fields: [idSlot], references: [idSlot], onUpdate: Restrict, map: "FK_Cita_Slot")
   multa              multa[]
-  pago               pago[]
+  pago               pago?
 
   @@index([idServicio], map: "FK_CIta_Servicio")
   @@index([idPaciente], map: "FK_Cita_Paciente")
@@ -33,12 +33,9 @@ model paciente {
   aMaterno           String    @db.VarChar(30)
   edad               Int
   contactoTelefonico String    @db.VarChar(10)
-  nombreFacturacion  String    @db.VarChar(50)
-  correoFacturacion  String    @db.VarChar(60)
   fechaRegistro      DateTime  @db.Date
   idTerapeuta        Int
   activo             Boolean   @default(true)
-  requiereFactura    Boolean   @default(false)
   cita               cita[]
   terapeuta          terapeuta @relation(fields: [idTerapeuta], references: [idTerapeuta], onUpdate: Restrict, map: "FK_Paciente_Terapeuta")
 
@@ -46,12 +43,15 @@ model paciente {
 }
 
 model pago {
-  idPago      Int      @id @default(autoincrement())
-  fecha       DateTime @db.Date
-  metodo      String   @db.VarChar(30)
-  facturacion Boolean  @default(false)
-  idCita      Int
-  cita        cita     @relation(fields: [idCita], references: [idCita], onUpdate: Restrict, map: "FK_Pago_Cita")
+  idPago            Int      @id @default(autoincrement())
+  fecha             DateTime @db.Date
+  metodo            String   @db.VarChar(30)
+  monto             Decimal  @db.Decimal(10, 2)
+  requiereFactura   Boolean  @default(false)
+  nombreFacturacion String?  @db.VarChar(50)
+  correoFacturacion String?  @db.VarChar(60)
+  idCita            Int      @unique
+  cita              cita     @relation(fields: [idCita], references: [idCita], onUpdate: Restrict, map: "FK_Pago_Cita")
 
   @@index([idCita], map: "FK_Pago_Cita")
 }
@@ -70,6 +70,7 @@ model servicio {
   idServicio  Int     @id @default(autoincrement())
   nombre      String  @db.VarChar(30)
   descripcion String  @db.VarChar(50)
+  precio      Decimal @db.Decimal(10, 2)
   activo      Boolean @default(true)
   cita        cita[]
 }

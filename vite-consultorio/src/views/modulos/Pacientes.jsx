@@ -5,7 +5,6 @@ import {
   Box,
   Button,
   Checkbox,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -33,7 +32,10 @@ import { IconArrowLeft, IconCheck, IconEdit, IconPlus, IconRefresh, IconSearch, 
 import MainCard from 'ui-component/cards/MainCard';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-const CORREO_PUBLICO_GENERAL = 'publico.general@clinica.com';
+const obtenerFechaLocalISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 // Muestra primero Nombre(s), luego Apellido Paterno y Apellido Materno
 const formatearNombre = (persona) => {
@@ -70,9 +72,7 @@ const estadoInicial = {
   aMaterno: '',
   edad: '',
   contactoTelefonico: '',
-  requiereFactura: false,
-  nombreFacturacion: 'PÚBLICO GENERAL',
-  correoFacturacion: CORREO_PUBLICO_GENERAL,
+  fechaRegistro: obtenerFechaLocalISO(),
   idTerapeuta: '',
   activo: true
 };
@@ -115,7 +115,6 @@ export default function Pacientes() {
   };
 
   const abrirEditar = (paciente) => {
-    const reqFact = Boolean(paciente.requiereFactura);
     setEditandoId(paciente.idPaciente);
     setForm({
       nombre: (paciente.nombre || '').toUpperCase(),
@@ -123,31 +122,11 @@ export default function Pacientes() {
       aMaterno: (paciente.aMaterno || '').toUpperCase(),
       edad: paciente.edad,
       contactoTelefonico: formatearTelefono(paciente.contactoTelefonico),
-      requiereFactura: reqFact,
-      nombreFacturacion: reqFact ? (paciente.nombreFacturacion || '').toUpperCase() : 'PÚBLICO GENERAL',
-      correoFacturacion: reqFact ? paciente.correoFacturacion || '' : CORREO_PUBLICO_GENERAL,
+      fechaRegistro: String(paciente.fechaRegistro || obtenerFechaLocalISO()).slice(0, 10),
       idTerapeuta: paciente.idTerapeuta,
       activo: Boolean(paciente.activo)
     });
     setOpenModal(true);
-  };
-
-  const handleToggleFactura = (checked) => {
-    if (!checked) {
-      setForm({
-        ...form,
-        requiereFactura: false,
-        nombreFacturacion: 'PÚBLICO GENERAL',
-        correoFacturacion: CORREO_PUBLICO_GENERAL
-      });
-    } else {
-      setForm({
-        ...form,
-        requiereFactura: true,
-        nombreFacturacion: form.nombreFacturacion === 'PÚBLICO GENERAL' ? '' : form.nombreFacturacion,
-        correoFacturacion: form.correoFacturacion === CORREO_PUBLICO_GENERAL ? '' : form.correoFacturacion
-      });
-    }
   };
 
   const handleGuardar = async (e) => {
@@ -169,9 +148,7 @@ export default function Pacientes() {
       aMaterno: form.aMaterno.trim().toUpperCase(),
       edad: Number(form.edad),
       contactoTelefonico: telefonoLimpio,
-      requiereFactura: form.requiereFactura,
-      nombreFacturacion: form.requiereFactura ? form.nombreFacturacion.trim().toUpperCase() : 'PÚBLICO GENERAL',
-      correoFacturacion: form.requiereFactura ? form.correoFacturacion.trim().toLowerCase() : CORREO_PUBLICO_GENERAL,
+      fechaRegistro: form.fechaRegistro,
       idTerapeuta: Number(form.idTerapeuta),
       activo: Boolean(form.activo)
     };
@@ -320,16 +297,10 @@ export default function Pacientes() {
               <TableCell>
                 <strong>Teléfono</strong>
               </TableCell>
-              <TableCell align="center">
-                <strong>Facturación</strong>
-              </TableCell>
-              <TableCell>
-                <strong>Nombre de Facturación</strong>
-              </TableCell>
               <TableCell>
                 <strong>Terapeuta Asignado</strong>
               </TableCell>
-              <TableCell align="right">
+              <TableCell align="center">
                 <strong>Acciones</strong>
               </TableCell>
             </TableRow>
@@ -343,43 +314,26 @@ export default function Pacientes() {
                 <TableCell>{(p.aMaterno || '').toUpperCase()}</TableCell>
                 <TableCell>{p.edad} AÑOS</TableCell>
                 <TableCell>{formatearTelefono(p.contactoTelefonico)}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={p.requiereFactura ? 'REQUIERE FACTURA' : 'PÚBLICO GENERAL'}
-                    color={p.requiereFactura ? 'info' : 'default'}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell align="center">
-                  <Tooltip title={p.requiereFactura ? 'Requiere factura' : 'Público general'}>
-                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {p.requiereFactura ? (
-                        <IconCheck size={20} color="#2e7d32" stroke={2.5} />
-                      ) : (
-                        <IconX size={20} color="#d32f2f" stroke={2.5} />
-                      )}
-                    </Box>
-                  </Tooltip>
-                </TableCell>
-                <TableCell>{(p.nombreFacturacion || 'PÚBLICO GENERAL').toUpperCase()}</TableCell>
                 <TableCell>{formatearNombre(p.terapeuta)}</TableCell>
-                <TableCell align="right">
-                  <Tooltip title="Editar">
-                    <IconButton size="small" color="primary" onClick={() => abrirEditar(p)}>
-                      <IconEdit size={18} />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Dar de baja">
-                    <IconButton size="small" color="error" onClick={() => handleEliminar(p)}>
-                      <IconTrash size={18} />
-                    </IconButton>
-                  </Tooltip>
+                <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+                  <Stack direction="row" spacing={0.5} justifyContent="center">
+                    <Tooltip title="Editar">
+                      <IconButton size="small" color="primary" onClick={() => abrirEditar(p)}>
+                        <IconEdit size={18} />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Dar de baja">
+                      <IconButton size="small" color="error" onClick={() => handleEliminar(p)}>
+                        <IconTrash size={18} />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
                 </TableCell>
               </TableRow>
             ))}
             {pacientesActivos.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} align="center">
+                <TableCell colSpan={8} align="center">
                   No se encontraron pacientes activos.
                 </TableCell>
               </TableRow>
@@ -416,16 +370,10 @@ export default function Pacientes() {
               <TableCell>
                 <strong>Teléfono</strong>
               </TableCell>
-              <TableCell align={'center'}>
-                <strong>Facturación</strong>
-              </TableCell>
-              <TableCell>
-                <strong>Nombre de Facturación</strong>
-              </TableCell>
               <TableCell>
                 <strong>Terapeuta Asignado</strong>
               </TableCell>
-              <TableCell align="right">
+              <TableCell align="center">
                 <strong>Acciones</strong>
               </TableCell>
             </TableRow>
@@ -439,29 +387,10 @@ export default function Pacientes() {
                 <TableCell>{(p.aMaterno || '').toUpperCase()}</TableCell>
                 <TableCell>{p.edad} AÑOS</TableCell>
                 <TableCell>{formatearTelefono(p.contactoTelefonico)}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={p.requiereFactura ? 'REQUIERE FACTURA' : 'PÚBLICO GENERAL'}
-                    color={p.requiereFactura ? 'info' : 'default'}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell align="center">
-                  <Tooltip title={p.requiereFactura ? 'Requiere factura' : 'Público general'}>
-                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {p.requiereFactura ? (
-                        <IconCheck size={20} color="#2e7d32" stroke={2.5} />
-                      ) : (
-                        <IconX size={20} color="#d32f2f" stroke={2.5} />
-                      )}
-                    </Box>
-                  </Tooltip>
-                </TableCell>
-                <TableCell>{(p.nombreFacturacion || 'PÚBLICO GENERAL').toUpperCase()}</TableCell>
                 <TableCell>{formatearNombre(p.terapeuta)}</TableCell>
-                <TableCell align="right">
-                  <Tooltip title="Reactivar paciente">
-                    <IconButton size="small" color="success" onClick={() => handleReactivar(p)}>
+                <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+                  <Tooltip title="Reactivar">
+                    <IconButton color="success" size="small" onClick={() => handleReactivar(p)}>
                       <IconRefresh size={18} />
                     </IconButton>
                   </Tooltip>
@@ -470,7 +399,7 @@ export default function Pacientes() {
             ))}
             {pacientesInactivos.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} align="center">
+                <TableCell colSpan={8} align="center">
                   No hay pacientes dados de baja.
                 </TableCell>
               </TableRow>
@@ -535,6 +464,17 @@ export default function Pacientes() {
                   onChange={(e) => setForm({ ...form, contactoTelefonico: formatearTelefono(e.target.value) })}
                 />
               </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  required
+                  type="date"
+                  label="Fecha de registro"
+                  InputLabelProps={{ shrink: true }}
+                  value={form.fechaRegistro || obtenerFechaLocalISO()}
+                  onChange={(e) => setForm({ ...form, fechaRegistro: e.target.value })}
+                />
+              </Grid>
               <Grid item xs={12} sx={{ width: '100%' }}>
                 <TextField
                   select
@@ -554,35 +494,7 @@ export default function Pacientes() {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={<Checkbox checked={form.requiereFactura} onChange={(e) => handleToggleFactura(e.target.checked)} />}
-                  label="¿Requiere factura?"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  required={form.requiereFactura}
-                  disabled={!form.requiereFactura}
-                  label="Nombre de facturación"
-                  inputProps={{ maxLength: 100 }}
-                  value={form.nombreFacturacion}
-                  onChange={(e) => setForm({ ...form, nombreFacturacion: e.target.value.toUpperCase() })}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  required={form.requiereFactura}
-                  disabled={!form.requiereFactura}
-                  type="email"
-                  label="Correo de Facturación"
-                  inputProps={{ maxLength: 80 }}
-                  value={form.correoFacturacion}
-                  onChange={(e) => setForm({ ...form, correoFacturacion: e.target.value.toLowerCase() })}
-                />
-              </Grid>
+
               {editandoId && (
                 <Grid item xs={12}>
                   <FormControlLabel

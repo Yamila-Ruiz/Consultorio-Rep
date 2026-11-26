@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 
+const normalizarTexto = (texto: unknown) =>
+    String(texto || '')
+        .trim()
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+
 // Consulta los pagos y recupera paciente, servicio y terapeuta mediante la cita relacionada.
 export const getPagos = async (_req: Request, res: Response) => {
     try {
@@ -16,7 +23,14 @@ export const getPagos = async (_req: Request, res: Response) => {
             },
             orderBy: [{ fecha: 'desc' }, { idPago: 'desc' }]
         });
-        res.json(pagos);
+
+        // Se incluye el alias "facturacion" para que el frontend lo lea directamente
+        const pagosFormateados = pagos.map((p) => ({
+            ...p,
+            facturacion: p.requiereFactura
+        }));
+
+        res.json(pagosFormateados);
     } catch (error) {
         console.error('Error al obtener pagos:', error);
         res.status(500).json({ error: 'Error al obtener los pagos registrados' });
@@ -24,38 +38,36 @@ export const getPagos = async (_req: Request, res: Response) => {
 };
 
 // Registra un pago tomando el monto del precio actual del servicio de la cita.
-// El nombre y correo de facturación se guardan en el pago, nunca en el paciente.
-
 export const registrarPago = async (req: Request, res: Response) => {
     const {
         idCita,
         metodoPago,
+        metodo,
         nombreFacturacion,
         correoFacturacion
     } = req.body;
 
     // Recibir la opción de facturación desde React o desde Prisma.
-    const facturacionRecibida = req.body.facturacion ?? req.body.requiereFactura;
+    const facturacionRecibida = req.body.requiereFactura ?? req.body.facturacion;
 
     let requiereFactura = false;
 
-    if (facturacionRecibida === true ||
+    if (
+        facturacionRecibida === true ||
         facturacionRecibida === 'true' ||
         facturacionRecibida === 'SI' ||
-        facturacionRecibida === 1) {
-
+        facturacionRecibida === 1
+    ) {
         requiereFactura = true;
-
     } else if (
         facturacionRecibida === false ||
         facturacionRecibida === 'false' ||
         facturacionRecibida === 'NO' ||
         facturacionRecibida === 0 ||
-        facturacionRecibida === undefined
+        facturacionRecibida === undefined ||
+        facturacionRecibida === null
     ) {
-
         requiereFactura = false;
-
     } else {
         res.status(400).json({
             error: 'El campo de facturación debe ser verdadero o falso'
@@ -72,8 +84,8 @@ export const registrarPago = async (req: Request, res: Response) => {
         return;
     }
 
-    // Validar el método de pago.
-    const metodo = String(metodoPago || '').trim().toUpperCase();
+    // Validar el método de pago aceptando con o sin acentos.
+    const metodoNormalizado = normalizarTexto(metodoPago ?? metodo);
 
     const metodosPermitidos = [
         'EFECTIVO',
@@ -82,7 +94,7 @@ export const registrarPago = async (req: Request, res: Response) => {
         'TRANSFERENCIA'
     ];
 
-    if (!metodosPermitidos.includes(metodo)) {
+    if (!metodosPermitidos.includes(metodoNormalizado)) {
         res.status(400).json({
             error: 'Selecciona un método de pago válido'
         });
@@ -104,8 +116,7 @@ export const registrarPago = async (req: Request, res: Response) => {
 
     if (
         requiereFactura &&
-        (!nombre || nombre.length > 50 ||
-            !correo || correo.length > 60 || !correoValido)
+        (!nombre || nombre.length > 50 || !correo || correo.length > 60 || !correoValido)
     ) {
         res.status(400).json({
             error: 'Para facturar captura un nombre y correo válidos'
@@ -115,52 +126,31 @@ export const registrarPago = async (req: Request, res: Response) => {
 
     try {
         const pago = await prisma.$transaction(async (tx) => {
-
-            // Consultar la cita y obtener el servicio relacionado.
             const cita = await tx.cita.findUnique({
-                where: {
-                    idCita: citaId
-                },
-                include: {
-                    servicio: true
-                }
+                where: { idCita: citaId },
+                include: { servicio: true }
             });
 
-            if (!cita) {
-                throw new Error('CITA_NO_EXISTE');
-            }
+            if (!cita) throw new Error('CITA_NO_EXISTE');
 
-            // Solamente se pueden cobrar citas confirmadas o atendidas.
-            if (
-                cita.estado !== 'CONFIRMADA' &&
-                cita.estado !== 'ATENDIDA'
-            ) {
+            if (cita.estado !== 'CONFIRMADA' && cita.estado !== 'ATENDIDA') {
                 throw new Error('CITA_NO_COBRABLE');
             }
 
-            // Comprobar que la cita todavía no tenga un pago.
             const existente = await tx.pago.findUnique({
-                where: {
-                    idCita: citaId
-                }
+                where: { idCita: citaId }
             });
 
-            if (existente) {
-                throw new Error('PAGO_DUPLICADO');
-            }
+            if (existente) throw new Error('PAGO_DUPLICADO');
 
-            // Obtener el monto del precio del servicio.
             const monto = cita.servicio.precio;
 
-            if (Number(monto) <= 0) {
-                throw new Error('PRECIO_INVALIDO');
-            }
+            if (Number(monto) <= 0) throw new Error('PRECIO_INVALIDO');
 
-            // Guardar el pago y conservar sus datos históricos de facturación.
             const nuevoPago = await tx.pago.create({
                 data: {
                     fecha: new Date(),
-                    metodo,
+                    metodo: metodoNormalizado,
                     monto,
                     requiereFactura,
                     nombreFacturacion: nombre,
@@ -173,108 +163,85 @@ export const registrarPago = async (req: Request, res: Response) => {
                             paciente: true,
                             servicio: true,
                             slotdisponibilidad: {
-                                include: {
-                                    terapeuta: true
-                                }
+                                include: { terapeuta: true }
                             }
                         }
                     }
                 }
             });
 
-            // Cambiar la cita a atendida después de registrar el pago.
             if (cita.estado === 'CONFIRMADA') {
                 await tx.cita.update({
-                    where: {
-                        idCita: citaId
-                    },
-                    data: {
-                        estado: 'ATENDIDA'
-                    }
+                    where: { idCita: citaId },
+                    data: { estado: 'ATENDIDA' }
                 });
             }
 
-            return nuevoPago;
+            return {
+                ...nuevoPago,
+                facturacion: nuevoPago.requiereFactura
+            };
         });
 
         res.status(201).json(pago);
-
     } catch (error) {
-
         if (error instanceof Error) {
             if (error.message === 'CITA_NO_EXISTE') {
-                res.status(404).json({
-                    error: 'La cita no existe'
-                });
+                res.status(404).json({ error: 'La cita no existe' });
                 return;
             }
-
             if (error.message === 'CITA_NO_COBRABLE') {
-                res.status(400).json({
-                    error: 'Solo se pueden cobrar citas confirmadas o atendidas'
-                });
+                res.status(400).json({ error: 'Solo se pueden cobrar citas confirmadas o atendidas' });
                 return;
             }
-
             if (error.message === 'PAGO_DUPLICADO') {
-                res.status(409).json({
-                    error: 'Esta cita ya tiene un pago registrado'
-                });
+                res.status(409).json({ error: 'Esta cita ya tiene un pago registrado' });
                 return;
             }
-
             if (error.message === 'PRECIO_INVALIDO') {
-                res.status(400).json({
-                    error: 'El servicio no tiene un precio válido'
-                });
+                res.status(400).json({ error: 'El servicio no tiene un precio válido' });
                 return;
             }
         }
 
-        // Evitar pagos duplicados mediante la restricción UNIQUE de idCita.
-        if (
-            typeof error === 'object' &&
-            error !== null &&
-            'code' in error &&
-            error.code === 'P2002'
-        ) {
-            res.status(409).json({
-                error: 'Esta cita ya tiene un pago registrado'
-            });
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
+            res.status(409).json({ error: 'Esta cita ya tiene un pago registrado' });
             return;
         }
 
         console.error('Error al registrar pago:', error);
-
-        res.status(500).json({
-            error: 'Error al registrar el pago'
-        });
+        res.status(500).json({ error: 'Error al registrar el pago' });
     }
 };
-
 
 // Permite corregir el método y los datos de facturación sin alterar el importe histórico.
 export const updatePago = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: 'Identificador de pago inválido' });
 
-    const { metodoPago, facturacion, nombreFacturacion, correoFacturacion } = req.body;
+    const { metodoPago, metodo, nombreFacturacion, correoFacturacion } = req.body;
+    const facturacionRecibida = req.body.requiereFactura ?? req.body.facturacion;
+
     try {
         const actual = await prisma.pago.findUnique({ where: { idPago: id } });
         if (!actual) return void res.status(404).json({ error: 'No se encontró el pago' });
-        const data: any = {};
+        const data: Record<string, unknown> = {};
 
-        if (metodoPago !== undefined) {
-            const metodo = String(metodoPago).trim().toUpperCase();
-            if (!['EFECTIVO', 'TARJETA DE DEBITO', 'TARJETA DE CREDITO', 'TRANSFERENCIA'].includes(metodo)) {
+        const metodoEntrada = metodoPago ?? metodo;
+        if (metodoEntrada !== undefined) {
+            const metodoNormalizado = normalizarTexto(metodoEntrada);
+            if (!['EFECTIVO', 'TARJETA DE DEBITO', 'TARJETA DE CREDITO', 'TRANSFERENCIA'].includes(metodoNormalizado)) {
                 return void res.status(400).json({ error: 'Método de pago inválido' });
             }
-            data.metodo = metodo;
+            data.metodo = metodoNormalizado;
         }
-        if (facturacion !== undefined) {
-            if (typeof facturacion !== 'boolean') return void res.status(400).json({ error: 'facturacion debe ser verdadero o falso' });
-            data.requiereFactura = facturacion;
-            if (!facturacion) {
+
+        if (facturacionRecibida !== undefined) {
+            if (typeof facturacionRecibida !== 'boolean') {
+                return void res.status(400).json({ error: 'El campo de facturación debe ser verdadero o falso' });
+            }
+            data.requiereFactura = facturacionRecibida;
+            if (!facturacionRecibida) {
                 data.nombreFacturacion = null;
                 data.correoFacturacion = null;
             } else {
@@ -296,20 +263,22 @@ export const updatePago = async (req: Request, res: Response) => {
             data.nombreFacturacion = nombre;
             data.correoFacturacion = correo;
         }
+
         if (!Object.keys(data).length) return void res.status(400).json({ error: 'No hay datos para actualizar' });
 
         const actualizado = await prisma.pago.update({
-            where: { idPago: id }, data,
+            where: { idPago: id },
+            data,
             include: { cita: { include: { paciente: true, servicio: true, slotdisponibilidad: { include: { terapeuta: true } } } } }
         });
-        res.json(actualizado);
+
+        res.json({ ...actualizado, facturacion: actualizado.requiereFactura });
     } catch (error) {
         console.error('Error al actualizar pago:', error);
         res.status(500).json({ error: 'Error al actualizar el pago' });
     }
 };
 
-// Conserva el comportamiento CRUD existente; eliminar pagos requiere definir antes una reversión contable.
 export const deletePago = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: 'Identificador de pago inválido' });

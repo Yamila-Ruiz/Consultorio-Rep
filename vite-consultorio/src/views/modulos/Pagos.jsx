@@ -110,7 +110,9 @@ export default function Pagos() {
                 <TableCell>
                   <Chip size="small" label={p.metodo} />
                 </TableCell>
-                <TableCell>{p.facturacion ? `${p.nombreFacturacion} · ${p.correoFacturacion}` : 'No requiere'}</TableCell>
+                <TableCell>
+                  {p.requiereFactura ? `${p.nombreFacturacion || 'Sin nombre'} ` : 'No requiere'}
+                </TableCell>
                 <TableCell align="right">
                   <strong>${Number(p.monto || 0).toFixed(2)}</strong>
                 </TableCell>

@@ -1,7 +1,13 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
+import { isPositiveInteger, parsePathId } from '../utils/requestValidation';
 
 const MONTO_MULTA_INASISTENCIA = 200;
+const ESTADOS_CITA = ['AGENDADA', 'CONFIRMADA', 'ATENDIDA', 'CANCELADA', 'INASISTENCIA'] as const;
+type EstadoCita = typeof ESTADOS_CITA[number];
+
+const esEstadoCita = (value: string): value is EstadoCita =>
+    ESTADOS_CITA.includes(value as EstadoCita);
 
 // Devuelve citas con paciente, precio del servicio, multa y terapeuta del horario.
 export const getCitas = async (_req: Request, res: Response) => {
@@ -25,14 +31,18 @@ export const getCitas = async (_req: Request, res: Response) => {
 
 // Agenda una cita y reserva el slot en una transacción.
 export const createCita = async (req: Request, res: Response) => {
-    const { idPaciente, idServicio, idSlot, esPrimeraSesion } = req.body;
-    const pacienteId = Number(idPaciente);
-    const servicioId = Number(idServicio);
-    const slotId = Number(idSlot);
-    if (![pacienteId, servicioId, slotId].every((n) => Number.isInteger(n) && n > 0)) {
+    const { idPaciente, idServicio, idSlot, esPrimeraSesion } = req.body as Record<string, unknown>;
+    if (!isPositiveInteger(idPaciente) || !isPositiveInteger(idServicio) || !isPositiveInteger(idSlot)) {
         res.status(400).json({ error: 'Paciente, servicio y horario disponible son obligatorios.' });
         return;
     }
+    if (esPrimeraSesion !== undefined && typeof esPrimeraSesion !== 'boolean') {
+        res.status(400).json({ error: 'esPrimeraSesion debe ser un valor booleano.' });
+        return;
+    }
+    const pacienteId = idPaciente;
+    const servicioId = idServicio;
+    const slotId = idSlot;
     try {
         const nuevaCita = await prisma.$transaction(async (tx) => {
             const [paciente, servicio, slot] = await Promise.all([
@@ -55,7 +65,7 @@ export const createCita = async (req: Request, res: Response) => {
 
             const reservado = await tx.slotdisponibilidad.updateMany({ where: { idSlot: slotId, estado: true }, data: { estado: false } });
             if (reservado.count !== 1) throw new Error('SLOT_OCUPADO');
-            return tx.cita.create({ data: { idPaciente: pacienteId, idServicio: servicioId, idSlot: slotId, esPrimeraSesion: esPrimeraSesion === true || esPrimeraSesion === 'true', estado: 'AGENDADA' } });
+            return tx.cita.create({ data: { idPaciente: pacienteId, idServicio: servicioId, idSlot: slotId, esPrimeraSesion: esPrimeraSesion ?? false, estado: 'AGENDADA' } });
         });
         res.status(201).json(nuevaCita);
     } catch (error) {
@@ -76,17 +86,28 @@ export const createCita = async (req: Request, res: Response) => {
 
 // Cambia el estado; la multa fija se crea solo al pasar de CONFIRMADA a INASISTENCIA.
 export const updateCita = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const { estado, esPrimeraSesion, idServicio } = req.body;
-    const estados = ['AGENDADA', 'CONFIRMADA', 'ATENDIDA', 'CANCELADA', 'INASISTENCIA'];
-    if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: 'Identificador de cita inválido' });
-    const estadoNuevo = estado === undefined ? undefined : String(estado).trim().toUpperCase();
-    if (estadoNuevo !== undefined && !estados.includes(estadoNuevo)) return void res.status(400).json({ error: 'Estado de cita inválido' });
+    const id = parsePathId(req.params.id);
+    if (id === null) return void res.status(400).json({ error: 'Identificador de cita inválido' });
+    const { estado, esPrimeraSesion, idServicio } = req.body as Record<string, unknown>;
+    if (estado !== undefined && typeof estado !== 'string') return void res.status(400).json({ error: 'El estado de cita debe ser texto.' });
+    const estadoNuevo = typeof estado === 'string' ? estado.trim().toUpperCase() : undefined;
+    if (estadoNuevo !== undefined && !esEstadoCita(estadoNuevo)) return void res.status(400).json({ error: 'Estado de cita inválido' });
+    if (esPrimeraSesion !== undefined && typeof esPrimeraSesion !== 'boolean') {
+        return void res.status(400).json({ error: 'esPrimeraSesion debe ser un valor booleano.' });
+    }
+    if (idServicio !== undefined && !isPositiveInteger(idServicio)) {
+        return void res.status(400).json({ error: 'El servicio debe identificarse con un entero positivo.' });
+    }
 
     try {
         const actualizada = await prisma.$transaction(async (tx) => {
             const actual = await tx.cita.findUnique({ where: { idCita: id } });
             if (!actual) throw new Error('CITA_NO_EXISTE');
+            if (idServicio !== undefined) {
+                const servicio = await tx.servicio.findUnique({ where: { idServicio } });
+                if (!servicio) throw new Error('SERVICIO_NO_EXISTE');
+                if (!servicio.activo) throw new Error('SERVICIO_INACTIVO');
+            }
             if (estadoNuevo === 'INASISTENCIA' && actual.estado !== 'CONFIRMADA') throw new Error('INASISTENCIA_REQUIERE_CONFIRMACION');
             if (estadoNuevo === 'CANCELADA' && actual.estado !== 'CANCELADA') {
                 await tx.slotdisponibilidad.update({ where: { idSlot: actual.idSlot }, data: { estado: true } });
@@ -98,15 +119,17 @@ export const updateCita = async (req: Request, res: Response) => {
             return tx.cita.update({
                 where: { idCita: id },
                 data: {
-                    ...(estadoNuevo !== undefined ? { estado: estadoNuevo as any } : {}),
-                    ...(esPrimeraSesion !== undefined ? { esPrimeraSesion: esPrimeraSesion === true || esPrimeraSesion === 'true' } : {}),
-                    ...(idServicio !== undefined ? { idServicio: Number(idServicio) } : {})
+                    ...(estadoNuevo !== undefined ? { estado: estadoNuevo } : {}),
+                    ...(esPrimeraSesion !== undefined ? { esPrimeraSesion } : {}),
+                    ...(idServicio !== undefined ? { idServicio } : {})
                 }
             });
         });
         res.json(actualizada);
     } catch (error) {
         if (error instanceof Error && error.message === 'CITA_NO_EXISTE') return void res.status(404).json({ error: 'La cita no existe.' });
+        if (error instanceof Error && error.message === 'SERVICIO_NO_EXISTE') return void res.status(404).json({ error: 'El servicio no existe.' });
+        if (error instanceof Error && error.message === 'SERVICIO_INACTIVO') return void res.status(400).json({ error: 'El servicio seleccionado está inactivo.' });
         if (error instanceof Error && error.message === 'INASISTENCIA_REQUIERE_CONFIRMACION') return void res.status(400).json({ error: 'Primero debe estar CONFIRMADA para generar la multa por inasistencia.' });
         console.error('Error al actualizar cita:', error);
         res.status(500).json({ error: 'Error al actualizar la cita' });
@@ -115,7 +138,8 @@ export const updateCita = async (req: Request, res: Response) => {
 
 // Cancela una cita y libera el horario sin eliminar el historial.
 export const deleteCita = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
+    const id = parsePathId(req.params.id);
+    if (id === null) return void res.status(400).json({ error: 'Identificador de cita inválido' });
     try {
         await prisma.$transaction(async (tx) => {
             const cita = await tx.cita.findUnique({ where: { idCita: id } });

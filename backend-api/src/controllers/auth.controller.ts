@@ -1,18 +1,17 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
+import { isNonEmptyString, isOptionalString, parsePathId } from '../utils/requestValidation';
 
 // Iniciar sesión y detectar automáticamente
 export const login = async (req: Request, res: Response) => {
-    const { nombreUsuario, contrasena } = req.body;
-//Valida que se hayan ingresado nombre de usuario y contraseña
-    if (!nombreUsuario || !contrasena) {
-        res.status(400).json({ error: 'Debe ingresar usuario y contraseña' });
+    const { nombreUsuario, contrasena } = req.body as Record<string, unknown>;
+    if (!isNonEmptyString(nombreUsuario, 50) || !isNonEmptyString(contrasena, 30)) {
+        res.status(400).json({ error: 'El usuario y la contraseña deben ser texto válido.' });
         return;
     }
-//Bloque try-cathc para manejo de interrupciones y busca el usuario con el metodo de prisma .findFirst dentro de terapeuta y recepcionista
     try {
         const usuario = await prisma.usuario.findFirst({
-            where: { nombreUsuario: String(nombreUsuario).trim().toUpperCase() },
+            where: { nombreUsuario: nombreUsuario.trim().toUpperCase() },
             include: {
                 recepcionista: true,
                 terapeuta: true
@@ -96,28 +95,44 @@ export const registrarUsuario = async (req: Request, res: Response) => {
         aMaterno,
         contactoTelefonico,
         especialidad
-    } = req.body;
-    //Formatear valores de teléfono y rol
-    const telefono = String(contactoTelefonico || '').replace(/\D/g, '');
-    const rolNormalizado = String(rol || '').trim().toLowerCase();
-//Validación de que el formulario tiene los datos completos
+    } = req.body as Record<string, unknown>;
+    if (
+        !isNonEmptyString(rol, 20) ||
+        !isNonEmptyString(contrasena, 30) ||
+        !isNonEmptyString(nombre, 60) ||
+        !isNonEmptyString(aPaterno, 60) ||
+        !isNonEmptyString(aMaterno, 60) ||
+        typeof contactoTelefonico !== 'string' ||
+        !isOptionalString(especialidad, 30)
+    ) {
+        res.status(400).json({ error: 'Los nombres, rol, contraseña y teléfono deben tener tipos y longitudes válidos.' });
+        return;
+    }
+
+    const telefono = contactoTelefonico.replace(/\D/g, '');
+    const rolNormalizado = rol.trim().toLowerCase();
     if (
         (rolNormalizado !== 'recepcionista' && rolNormalizado !== 'terapeuta') ||
-        !contrasena?.trim() ||
-        !nombre?.trim() ||
-        !aPaterno?.trim() ||
-        !aMaterno?.trim() ||
+        !nombre.trim() ||
+        !aPaterno.trim() ||
+        !aMaterno.trim() ||
         !/^\d{10}$/.test(telefono)
     ) {
         res.status(400).json({ error: 'Completa todos los campos obligatorios y verifica que el teléfono tenga 10 dígitos.' });
         return;
     }
-//Verifica que exista especialidad, siguiendo la lógica de Registrar terapeuta
-    if (rolNormalizado === 'terapeuta' && !especialidad?.trim()) {
-        res.status(400).json({ error: 'La especialidad es obligatoria para el rol de terapeuta.' });
+    let especialidadNormalizada = '';
+    if (rolNormalizado === 'terapeuta') {
+        if (!isNonEmptyString(especialidad, 30)) {
+            res.status(400).json({ error: 'La especialidad es obligatoria para el rol de terapeuta.' });
+            return;
+        }
+        especialidadNormalizada = especialidad.trim().toUpperCase();
+    } else if (especialidad !== undefined && typeof especialidad !== 'string') {
+        res.status(400).json({ error: 'La especialidad debe ser texto.' });
         return;
     }
-//Generar el usuario que se muestra con rol y nombre diviendolo, se muestra en mayúsculas
+
     const rolMayus = rolNormalizado.toUpperCase();
     const primerNombreMayus = nombre.trim().split(/\s+/)[0].toUpperCase();
     const nombreUsuarioGenerado = `${rolMayus} ${primerNombreMayus}`;
@@ -139,7 +154,7 @@ export const registrarUsuario = async (req: Request, res: Response) => {
             const nuevoUsuario = await tx.usuario.create({
                 data: {
                     nombreUsuario: nombreUsuarioGenerado,
-                    contrasena: String(contrasena).trim().slice(0, 30)
+                    contrasena: contrasena.trim()
                 }
             });
 
@@ -148,9 +163,9 @@ export const registrarUsuario = async (req: Request, res: Response) => {
             if (rolNormalizado === 'recepcionista') {
                 perfilCreado = await tx.recepcionista.create({
                     data: {
-                        nombre: String(nombre).trim().slice(0, 60).toUpperCase(),
-                        aPaterno: String(aPaterno).trim().slice(0, 60).toUpperCase(),
-                        aMaterno: String(aMaterno).trim().slice(0, 60).toUpperCase(),
+                        nombre: nombre.trim().toUpperCase(),
+                        aPaterno: aPaterno.trim().toUpperCase(),
+                        aMaterno: aMaterno.trim().toUpperCase(),
                         contactoTelefonico: telefono,
                         idUsuario: nuevoUsuario.idUsuario
                     }
@@ -158,11 +173,11 @@ export const registrarUsuario = async (req: Request, res: Response) => {
             } else if (rolNormalizado === 'terapeuta') {
                 perfilCreado = await tx.terapeuta.create({
                     data: {
-                        nombre: String(nombre).trim().slice(0, 60).toUpperCase(),
-                        aPaterno: String(aPaterno).trim().slice(0, 60).toUpperCase(),
-                        aMaterno: String(aMaterno).trim().slice(0, 60).toUpperCase(),
+                        nombre: nombre.trim().toUpperCase(),
+                        aPaterno: aPaterno.trim().toUpperCase(),
+                        aMaterno: aMaterno.trim().toUpperCase(),
                         contactoTelefonico: telefono,
-                        especialidad: String(especialidad).trim().slice(0, 30).toUpperCase(),
+                        especialidad: especialidadNormalizada,
                         idUsuario: nuevoUsuario.idUsuario
                     }
                 });
@@ -185,18 +200,27 @@ export const registrarUsuario = async (req: Request, res: Response) => {
 
 // Actualizar datos de un usuario
 export const actualizarUsuario = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const { nombreUsuario, contrasena } = req.body;
-//Validaciones longitud y datos válidos
+    const id = parsePathId(req.params.id);
+    if (id === null) {
+        res.status(400).json({ error: 'Identificador de usuario inválido.' });
+        return;
+    }
+    const { nombreUsuario, contrasena } = req.body as Record<string, unknown>;
+    if (
+        (nombreUsuario !== undefined && !isNonEmptyString(nombreUsuario, 50)) ||
+        (contrasena !== undefined && !isNonEmptyString(contrasena, 30)) ||
+        (nombreUsuario === undefined && contrasena === undefined)
+    ) {
+        res.status(400).json({ error: 'El nombre de usuario y la contraseña deben ser texto válido; envía al menos un campo.' });
+        return;
+    }
     try {
         const usuarioActualizado = await prisma.usuario.update({
             where: { idUsuario: id },
             data: {
-                //Si se deja un campo vacío se deja guardado el valor anterior
-                ...(nombreUsuario !== undefined && { nombreUsuario: String(nombreUsuario).trim().toUpperCase().slice(0, 50) }),
-                ...(contrasena !== undefined && { contrasena: String(contrasena).trim().slice(0, 30) })
+                ...(nombreUsuario !== undefined && { nombreUsuario: nombreUsuario.trim().toUpperCase() }),
+                ...(contrasena !== undefined && { contrasena: contrasena.trim() })
             },
-            //Validación de los datos que se mostrarán
             select: {
                 idUsuario: true,
                 nombreUsuario: true
@@ -204,6 +228,16 @@ export const actualizarUsuario = async (req: Request, res: Response) => {
         });
         res.json(usuarioActualizado);
     } catch (error) {
+        if (typeof error === 'object' && error !== null && 'code' in error) {
+            if (error.code === 'P2025') {
+                res.status(404).json({ error: 'No se encontró el usuario.' });
+                return;
+            }
+            if (error.code === 'P2002') {
+                res.status(409).json({ error: 'El nombre de usuario ya está en uso.' });
+                return;
+            }
+        }
         console.error('Error al actualizar usuario:', error);
         res.status(500).json({ error: 'Error al actualizar el usuario' });
     }
@@ -211,7 +245,11 @@ export const actualizarUsuario = async (req: Request, res: Response) => {
 
 // Eliminar un usuario
 export const eliminarUsuario = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
+    const id = parsePathId(req.params.id);
+    if (id === null) {
+        res.status(400).json({ error: 'Identificador de usuario inválido.' });
+        return;
+    }
 
     try {
         await prisma.usuario.delete({
@@ -219,6 +257,10 @@ export const eliminarUsuario = async (req: Request, res: Response) => {
         });
         res.json({ mensaje: 'Usuario eliminado correctamente' });
     } catch (error) {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2025') {
+            res.status(404).json({ error: 'No se encontró el usuario.' });
+            return;
+        }
         console.error('Error al eliminar usuario:', error);
         res.status(500).json({ error: 'No se pudo eliminar el usuario' });
     }

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
+import { isNonEmptyString, isNonNegativeInteger, isPositiveInteger, parsePathId } from '../utils/requestValidation';
 
 const fechaLocalHoy = () => {
     const d = new Date();
@@ -29,24 +30,30 @@ export const getPacientes = async (_req: Request, res: Response) => {
 
 // Registra los datos personales; fechaRegistro usa la fecha local actual si no se proporciona.
 export const createPaciente = async (req: Request, res: Response) => {
-    const { nombre, aPaterno, aMaterno, edad, contactoTelefonico, fechaRegistro, idTerapeuta } = req.body;
-    const nombreLimpio = String(nombre || '').trim().toUpperCase();
-    const paterno = String(aPaterno || '').trim().toUpperCase();
-    const materno = String(aMaterno || '').trim().toUpperCase();
-    const edadNumero = Number(edad);
-    const telefono = String(contactoTelefonico || '').replace(/\D/g, '');
-    const terapeutaId = Number(idTerapeuta);
-    if (!nombreLimpio || nombreLimpio.length > 30 || !paterno || paterno.length > 30 || !materno || materno.length > 30) return void res.status(400).json({ error: 'Nombre y apellidos son obligatorios y no deben superar 30 caracteres' });
-    if (!Number.isInteger(edadNumero) || edadNumero < 0 || edadNumero > 17) return void res.status(400).json({ error: 'La edad debe ser un entero entre 0 y 17 años' });
+    const { nombre, aPaterno, aMaterno, edad, contactoTelefonico, fechaRegistro, idTerapeuta, activo } =
+        req.body as Record<string, unknown>;
+    if (
+        !isNonEmptyString(nombre, 30) ||
+        !isNonEmptyString(aPaterno, 30) ||
+        !isNonEmptyString(aMaterno, 30)
+    ) return void res.status(400).json({ error: 'Nombre y apellidos deben ser texto y no superar 30 caracteres' });
+    const nombreLimpio = nombre.trim().toUpperCase();
+    const paterno = aPaterno.trim().toUpperCase();
+    const materno = aMaterno.trim().toUpperCase();
+    if (!isNonNegativeInteger(edad) || edad > 17) return void res.status(400).json({ error: 'La edad debe ser un entero entre 0 y 17 años' });
+    if (typeof contactoTelefonico !== 'string') return void res.status(400).json({ error: 'El teléfono debe enviarse como texto de 10 dígitos' });
+    const telefono = contactoTelefonico.replace(/\D/g, '');
     if (!/^\d{10}$/.test(telefono)) return void res.status(400).json({ error: 'El teléfono debe contener 10 dígitos' });
-    if (!Number.isInteger(terapeutaId) || terapeutaId <= 0) return void res.status(400).json({ error: 'Selecciona un terapeuta válido' });
+    if (!isPositiveInteger(idTerapeuta)) return void res.status(400).json({ error: 'Selecciona un terapeuta válido' });
+    if (activo !== undefined && typeof activo !== 'boolean') return void res.status(400).json({ error: 'El estado activo debe ser booleano' });
+    const terapeutaId = idTerapeuta;
     const fecha = fechaRegistro === undefined || fechaRegistro === '' ? fechaLocalHoy() : validarFecha(fechaRegistro);
     if (!fecha) return void res.status(400).json({ error: 'La fecha de registro debe tener formato AAAA-MM-DD y ser válida' });
     try {
         const terapeuta = await prisma.terapeuta.findUnique({ where: { idTerapeuta: terapeutaId } });
         if (!terapeuta || !terapeuta.activo) return void res.status(400).json({ error: 'El terapeuta no existe o está inactivo' });
         const paciente = await prisma.paciente.create({
-            data: { nombre: nombreLimpio, aPaterno: paterno, aMaterno: materno, edad: edadNumero, contactoTelefonico: telefono, fechaRegistro: fecha, idTerapeuta: terapeutaId, activo: true },
+            data: { nombre: nombreLimpio, aPaterno: paterno, aMaterno: materno, edad, contactoTelefonico: telefono, fechaRegistro: fecha, idTerapeuta: terapeutaId, activo: true },
             include: { terapeuta: true }
         });
         res.status(201).json(paciente);
@@ -58,27 +65,27 @@ export const createPaciente = async (req: Request, res: Response) => {
 
 // Actualiza solo los datos enviados; los datos de facturación pertenecen al pago y no al paciente.
 export const updatePaciente = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: 'Identificador de paciente inválido' });
-    const { nombre, aPaterno, aMaterno, edad, contactoTelefonico, fechaRegistro, idTerapeuta, activo } = req.body;
+    const id = parsePathId(req.params.id);
+    if (id === null) return void res.status(400).json({ error: 'Identificador de paciente inválido' });
+    const { nombre, aPaterno, aMaterno, edad, contactoTelefonico, fechaRegistro, idTerapeuta, activo } =
+        req.body as Record<string, unknown>;
     try {
         const actual = await prisma.paciente.findUnique({ where: { idPaciente: id } });
         if (!actual) return void res.status(404).json({ error: 'No se encontró el paciente' });
         const data: any = {};
         for (const [campo, valor] of [['nombre', nombre], ['aPaterno', aPaterno], ['aMaterno', aMaterno]] as const) {
             if (valor !== undefined) {
-                const texto = String(valor).trim().toUpperCase();
-                if (!texto || texto.length > 30) return void res.status(400).json({ error: `${campo} es obligatorio y no debe superar 30 caracteres` });
-                data[campo] = texto;
+                if (!isNonEmptyString(valor, 30)) return void res.status(400).json({ error: `${campo} debe ser texto y no superar 30 caracteres` });
+                data[campo] = valor.trim().toUpperCase();
             }
         }
         if (edad !== undefined) {
-            const n = Number(edad);
-            if (!Number.isInteger(n) || n < 0 || n > 17) return void res.status(400).json({ error: 'La edad debe ser un entero entre 0 y 17 años' });
-            data.edad = n;
+            if (!isNonNegativeInteger(edad) || edad > 17) return void res.status(400).json({ error: 'La edad debe ser un entero entre 0 y 17 años' });
+            data.edad = edad;
         }
         if (contactoTelefonico !== undefined) {
-            const tel = String(contactoTelefonico).replace(/\D/g, '');
+            if (typeof contactoTelefonico !== 'string') return void res.status(400).json({ error: 'El teléfono debe enviarse como texto de 10 dígitos' });
+            const tel = contactoTelefonico.replace(/\D/g, '');
             if (!/^\d{10}$/.test(tel)) return void res.status(400).json({ error: 'El teléfono debe contener 10 dígitos' });
             data.contactoTelefonico = tel;
         }
@@ -88,8 +95,8 @@ export const updatePaciente = async (req: Request, res: Response) => {
             data.fechaRegistro = fecha;
         }
         if (idTerapeuta !== undefined) {
-            const terapeutaId = Number(idTerapeuta);
-            if (!Number.isInteger(terapeutaId) || terapeutaId <= 0) return void res.status(400).json({ error: 'Terapeuta inválido' });
+            if (!isPositiveInteger(idTerapeuta)) return void res.status(400).json({ error: 'Terapeuta inválido' });
+            const terapeutaId = idTerapeuta;
             const terapeuta = await prisma.terapeuta.findUnique({ where: { idTerapeuta: terapeutaId } });
             if (!terapeuta || !terapeuta.activo) return void res.status(400).json({ error: 'El terapeuta no existe o está inactivo' });
             data.idTerapeuta = terapeutaId;
@@ -109,7 +116,8 @@ export const updatePaciente = async (req: Request, res: Response) => {
 
 // La baja es lógica para conservar el expediente y su historial de citas.
 export const deletePaciente = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
+    const id = parsePathId(req.params.id);
+    if (id === null) return void res.status(400).json({ error: 'Identificador de paciente inválido' });
     try {
         const paciente = await prisma.paciente.findUnique({ where: { idPaciente: id } });
         if (!paciente) return void res.status(404).json({ error: 'No se encontró el paciente' });

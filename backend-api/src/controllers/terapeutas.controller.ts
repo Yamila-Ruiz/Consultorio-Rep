@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { Prisma } from '../generated/prisma/client';
 import prisma from '../config/prisma';
 import { isNonEmptyString, isPositiveInteger, isOptionalString, parsePathId } from '../utils/requestValidation';
 import { generarNombreUsuarioDisponible } from '../utils/nombreUsuario';
@@ -97,6 +98,93 @@ export const createTerapeuta = async (req: Request, res: Response) => {
     }
 };
 
+// Procesa la baja y los cambios de agenda en la misma transacción.
+const resolverCitasDeBaja = async (
+    tx: Prisma.TransactionClient,
+    idTerapeuta: number,
+    especialidad: string
+) => {
+    const ahora = new Date();
+    const hoy = new Date(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()));
+    const hora = new Date(Date.UTC(1970, 0, 1, ahora.getHours(), ahora.getMinutes(), ahora.getSeconds()));
+    const citas = await tx.cita.findMany({
+        where: {
+            estado: { in: ['AGENDADA', 'CONFIRMADA'] },
+            slotdisponibilidad: {
+                idTerapeuta,
+                OR: [{ fecha: { gt: hoy } }, { fecha: hoy, inicio: { gte: hora } }]
+            }
+        },
+        include: { slotdisponibilidad: true },
+        orderBy: { idCita: 'asc' }
+    });
+
+    const resumen = { reasignadas: 0, canceladas: 0 };
+    for (const cita of citas) {
+        const { fecha, inicio, fin } = cita.slotdisponibilidad;
+                const disponibles = await tx.$queryRaw<{ idSlot: number }[]>`
+            SELECT alternativa.idSlot
+            FROM slotdisponibilidad AS original
+            JOIN slotdisponibilidad AS alternativa
+              ON alternativa.fecha = original.fecha
+             AND alternativa.inicio = original.inicio
+             AND alternativa.fin = original.fin
+             AND alternativa.idTerapeuta <> original.idTerapeuta
+            JOIN terapeuta AS candidato
+              ON candidato.idTerapeuta = alternativa.idTerapeuta
+            WHERE original.idSlot = ${cita.idSlot}
+              AND candidato.activo = TRUE
+              AND candidato.especialidad = ${especialidad}
+              AND alternativa.estado = TRUE
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM slotdisponibilidad AS ocupado
+                  JOIN cita AS otra ON otra.idSlot = ocupado.idSlot
+                  WHERE ocupado.idTerapeuta = alternativa.idTerapeuta
+                    AND ocupado.fecha = original.fecha
+                    AND ocupado.inicio < original.fin
+                    AND ocupado.fin > original.inicio
+                    AND otra.estado <> 'CANCELADA'
+              )
+            ORDER BY alternativa.idTerapeuta, alternativa.idSlot
+        `;
+
+        let reemplazo: number | undefined;
+        for (const slot of disponibles) {
+
+            const reserva = await tx.slotdisponibilidad.updateMany({
+                where: { idSlot: slot.idSlot, estado: true },
+                data: { estado: false }
+            });
+            if (reserva.count === 1) {
+                reemplazo = slot.idSlot;
+                break;
+            }
+        }
+
+        if (reemplazo === undefined) {
+            await tx.cita.update({
+                where: { idCita: cita.idCita },
+                data: { estado: 'CANCELADA' }
+            });
+            resumen.canceladas++;
+        } else {
+            await tx.cita.update({
+                where: { idCita: cita.idCita },
+                data: { idSlot: reemplazo }
+            });
+            resumen.reasignadas++;
+        }
+
+        await tx.slotdisponibilidad.updateMany({
+            where: { idSlot: cita.idSlot, cita: { none: { estado: { not: 'CANCELADA' } } } },
+            data: { estado: true }
+        });
+    }
+
+    return resumen;
+};
+
 export const updateTerapeuta = async (req: Request, res: Response) => {
     const id = parsePathId(req.params.id);
     if (id === null) return void res.status(400).json({ error: 'Identificador de terapeuta inválido.' });
@@ -138,19 +226,30 @@ export const updateTerapeuta = async (req: Request, res: Response) => {
             const usuario = await prisma.usuario.findUnique({ where: { idUsuario } });
             if (!usuario) return void res.status(400).json({ error: 'El usuario seleccionado no existe.' });
         }
-        const terapeutaActualizado = await prisma.terapeuta.update({
-            where: { idTerapeuta: id },
-            data: {
-                ...(nombre !== undefined && { nombre: nombre.trim().toUpperCase() }),
-                ...(aPaterno !== undefined && { aPaterno: aPaterno.trim().toUpperCase() }),
-                ...(aMaterno !== undefined && { aMaterno: aMaterno.trim().toUpperCase() }),
-                ...(telefonoLimpio !== undefined && { contactoTelefonico: telefonoLimpio }),
-                ...(especialidad !== undefined && { especialidad: especialidad.trim().toUpperCase() }),
-                ...(idUsuario !== undefined && { idUsuario }),
-                ...(activo !== undefined && { activo })
-            }
-        });
-        res.json(terapeutaActualizado);
+        const datos = {
+            ...(nombre !== undefined && { nombre: nombre.trim().toUpperCase() }),
+            ...(aPaterno !== undefined && { aPaterno: aPaterno.trim().toUpperCase() }),
+            ...(aMaterno !== undefined && { aMaterno: aMaterno.trim().toUpperCase() }),
+            ...(telefonoLimpio !== undefined && { contactoTelefonico: telefonoLimpio }),
+            ...(especialidad !== undefined && { especialidad: especialidad.trim().toUpperCase() }),
+            ...(idUsuario !== undefined && { idUsuario }),
+            ...(activo !== undefined && { activo })
+        };
+        if (activo !== false) {
+            const terapeutaActualizado = await prisma.terapeuta.update({
+                where: { idTerapeuta: id },
+                data: datos
+            });
+            return void res.json(terapeutaActualizado);
+        }
+
+        const resultado = await prisma.$transaction(async (tx) => {
+            const anterior = await tx.terapeuta.findUnique({ where: { idTerapeuta: id } });
+            const terapeuta = await tx.terapeuta.update({ where: { idTerapeuta: id }, data: datos });
+            const citas = await resolverCitasDeBaja(tx, id, anterior?.especialidad ?? terapeuta.especialidad);
+            return { ...terapeuta, citas };
+        }, { isolationLevel: 'Serializable' });
+        res.json(resultado);
     } catch (error) {
         if (typeof error === 'object' && error !== null && 'code' in error) {
             if (error.code === 'P2025') return void res.status(404).json({ error: 'No se encontró el terapeuta.' });
@@ -167,11 +266,14 @@ export const deleteTerapeuta = async (req: Request, res: Response) => {
     if (id === null) return void res.status(400).json({ error: 'Identificador de terapeuta inválido.' });
 
     try {
-        await prisma.terapeuta.update({
-            where: { idTerapeuta: id },
-            data: { activo: false }
-        });
-        res.json({ mensaje: 'Terapeuta dado de baja correctamente' });
+        const citas = await prisma.$transaction(async (tx) => {
+            const terapeuta = await tx.terapeuta.update({
+                where: { idTerapeuta: id },
+                data: { activo: false }
+            });
+            return resolverCitasDeBaja(tx, id, terapeuta.especialidad);
+        }, { isolationLevel: 'Serializable' });
+        res.json({ mensaje: 'Terapeuta dado de baja correctamente', citas });
     } catch (error) {
         if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2025') {
             res.status(404).json({ error: 'No se encontró el terapeuta.' });

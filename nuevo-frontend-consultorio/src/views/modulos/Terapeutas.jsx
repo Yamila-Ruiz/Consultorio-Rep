@@ -39,6 +39,9 @@ import {
 } from '@tabler/icons-react';
 import PageCard from '../../components/PageCard.jsx';
 
+const resumenCitasDeBaja = (citas) =>
+  citas ? ` Citas reasignadas: ${citas.reasignadas}. Citas canceladas: ${citas.canceladas}.` : '';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 const MESES_ES = [
@@ -319,7 +322,7 @@ export default function Terapeutas() {
         return;
       }
 
-      setMensaje({ tipo: 'success', texto: 'Datos del terapeuta actualizados' });
+      setMensaje({ tipo: 'success', texto: 'Datos del terapeuta actualizados.' + resumenCitasDeBaja(data.citas) });
       setOpenEditar(false);
       cargarDatos();
     } catch {
@@ -343,12 +346,11 @@ export default function Terapeutas() {
         return;
       }
 
-      setMensaje({ tipo: 'success', texto: 'Terapeuta dado de baja correctamente' });
+      setMensaje({ tipo: 'success', texto: 'Terapeuta dado de baja correctamente.' + resumenCitasDeBaja(data.citas) });
       if (Number(filtroSlotTerapeuta) === Number(terapeuta.idTerapeuta)) {
         setFiltroSlotTerapeuta('');
       }
       await cargarDatos();
-      cargarDatos();
     } catch {
       setMensaje({ tipo: 'error', texto: 'Error de conexión al dar de baja al terapeuta' });
     }

@@ -16,6 +16,13 @@ export const isPositiveInteger = (value: unknown): value is number =>
 export const isNonNegativeInteger = (value: unknown): value is number =>
     typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
+export const isAssignedTherapist = (patientTherapistId: number, slotTherapistId: number): boolean =>
+    Number.isSafeInteger(patientTherapistId) &&
+    patientTherapistId > 0 &&
+    Number.isSafeInteger(slotTherapistId) &&
+    slotTherapistId > 0 &&
+    patientTherapistId === slotTherapistId;
+
 export const parsePathId = (value: unknown): number | null => {
     if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
     const id = Number(value);

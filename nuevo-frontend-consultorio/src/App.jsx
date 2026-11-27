@@ -12,6 +12,7 @@ const Citas = lazy(() => import('./views/modulos/Citas.jsx'));
 const Pacientes = lazy(() => import('./views/modulos/Pacientes.jsx'));
 const Servicios = lazy(() => import('./views/modulos/Servicios.jsx'));
 const Pagos = lazy(() => import('./views/modulos/Pagos.jsx'));
+const Multas = lazy(() => import('./views/modulos/Multas.jsx'));
 const Facturacion = lazy(() => import('./views/modulos/Facturacion.jsx'));
 const Terapeutas = lazy(() => import('./views/modulos/Terapeutas.jsx'));
 
@@ -43,6 +44,7 @@ export default function App() {
                   <Route path="pacientes" element={<Pacientes />} />
                   <Route path="servicios" element={<Servicios />} />
                   <Route path="pagos" element={<Pagos />} />
+                  <Route path="multas" element={<Multas />} />
                   <Route path="facturacion" element={<Facturacion />} />
                   <Route path="terapeutas" element={<Terapeutas />} />
                 </Route>

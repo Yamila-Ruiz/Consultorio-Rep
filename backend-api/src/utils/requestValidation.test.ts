@@ -4,6 +4,7 @@ import {
     isRecord,
     isNonEmptyString,
     isOptionalNullableString,
+    isAssignedTherapist,
     isPositiveInteger,
     parsePathId
 } from './requestValidation';
@@ -28,6 +29,12 @@ test('integer validation does not coerce strings or fractions', () => {
     assert.equal(isPositiveInteger('42'), false);
     assert.equal(isPositiveInteger(4.2), false);
     assert.equal(isPositiveInteger(Number.MAX_SAFE_INTEGER + 1), false);
+});
+
+test('appointment scheduling requires the selected slot therapist to match the assigned therapist', () => {
+    assert.equal(isAssignedTherapist(7, 7), true);
+    assert.equal(isAssignedTherapist(7, 8), false);
+    assert.equal(isAssignedTherapist(0, 7), false);
 });
 
 test('path IDs accept only positive decimal safe integers', () => {

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 import { isNonEmptyString, isOptionalString, parsePathId } from '../utils/requestValidation';
+import { generarNombreUsuarioDisponible } from '../utils/nombreUsuario';
 
 // Iniciar sesión y detectar automáticamente
 export const login = async (req: Request, res: Response) => {
@@ -89,6 +90,7 @@ export const consultarUsuarios = async (req: Request, res: Response) => {
 export const registrarUsuario = async (req: Request, res: Response) => {
     const {
         contrasena,
+        nombreUsuario,
         rol,
         nombre,
         aPaterno,
@@ -103,7 +105,8 @@ export const registrarUsuario = async (req: Request, res: Response) => {
         !isNonEmptyString(aPaterno, 60) ||
         !isNonEmptyString(aMaterno, 60) ||
         typeof contactoTelefonico !== 'string' ||
-        !isOptionalString(especialidad, 30)
+        !isOptionalString(especialidad, 30) ||
+        (nombreUsuario !== undefined && !isNonEmptyString(nombreUsuario, 50))
     ) {
         res.status(400).json({ error: 'Los nombres, rol, contraseña y teléfono deben tener tipos y longitudes válidos.' });
         return;
@@ -135,25 +138,25 @@ export const registrarUsuario = async (req: Request, res: Response) => {
 
     const rolMayus = rolNormalizado.toUpperCase();
     const primerNombreMayus = nombre.trim().split(/\s+/)[0].toUpperCase();
-    const nombreUsuarioGenerado = `${rolMayus} ${primerNombreMayus}`;
+    const nombreUsuarioBase = `${rolMayus} ${primerNombreMayus}`;
 
     try {
-        //Validación de nombre de usuario
-        const usuarioExistente = await prisma.usuario.findFirst({
-            where: { nombreUsuario: nombreUsuarioGenerado }
-        });
-
-        if (usuarioExistente) {
-            res.status(409).json({
-                error: `El usuario "${nombreUsuarioGenerado}" ya existe.`
-            });
-            return;
-        }
-
         const resultado = await prisma.$transaction(async (tx) => {
+            const nombreUsuarioFinal = typeof nombreUsuario === 'string'
+                ? nombreUsuario.trim().toUpperCase()
+                : await generarNombreUsuarioDisponible(
+                    nombreUsuarioBase,
+                    async (nombre) =>
+                        (await tx.usuario.findFirst({ where: { nombreUsuario: nombre } })) !== null
+                );
+            const usuarioExistente = await tx.usuario.findFirst({
+                where: { nombreUsuario: nombreUsuarioFinal }
+            });
+            if (usuarioExistente) throw new Error('NOMBRE_USUARIO_DUPLICADO');
+
             const nuevoUsuario = await tx.usuario.create({
                 data: {
-                    nombreUsuario: nombreUsuarioGenerado,
+                    nombreUsuario: nombreUsuarioFinal,
                     contrasena: contrasena.trim()
                 }
             });
@@ -193,6 +196,10 @@ export const registrarUsuario = async (req: Request, res: Response) => {
 
         res.status(201).json(resultado);
     } catch (error) {
+        if (error instanceof Error && error.message === 'NOMBRE_USUARIO_DUPLICADO') {
+            res.status(409).json({ error: 'Ese nombre de usuario ya está registrado. Elige otro.' });
+            return;
+        }
         console.error('Error al registrar usuario:', error);
         res.status(500).json({ error: 'Error al registrar el usuario en la base de datos' });
     }

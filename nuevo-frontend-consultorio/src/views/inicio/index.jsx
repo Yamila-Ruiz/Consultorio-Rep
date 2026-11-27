@@ -60,6 +60,7 @@ export default function Inicio() {
   const [facturacion, setFacturacion] = useState(false);
   const [nombreFacturacion, setNombreFacturacion] = useState('');
   const [correoFacturacion, setCorreoFacturacion] = useState('');
+  const [errorPago, setErrorPago] = useState('');
   const [modalCita, setModalCita] = useState(null);
   const [idServicio, setIdServicio] = useState('');
   const [idSlot, setIdSlot] = useState('');
@@ -143,6 +144,7 @@ export default function Inicio() {
       .filter((p) => p.requiereFactura && p.nombreFacturacion && p.correoFacturacion)
       .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0];
     setModalPago(cita);
+    setErrorPago('');
     setMetodoPago('EFECTIVO');
     setFacturacion(Boolean(ultimo));
     setNombreFacturacion(ultimo?.nombreFacturacion || '');
@@ -151,8 +153,13 @@ export default function Inicio() {
 
   const guardarPago = async () => {
     if (!modalPago) return;
+    if (facturacion && (!nombreFacturacion.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correoFacturacion.trim()))) {
+      setErrorPago('Para solicitar factura, captura un nombre y un correo válido.');
+      return;
+    }
 
     try {
+      setErrorPago('');
       const datosPago = {
         idCita: modalPago.idCita,
         metodoPago,
@@ -160,8 +167,6 @@ export default function Inicio() {
         nombreFacturacion: facturacion ? nombreFacturacion.trim() : null,
         correoFacturacion: facturacion ? correoFacturacion.trim() : null
       };
-
-      console.log('Datos enviados al registrar pago:', datosPago);
 
       const r = await fetch(`${API_URL}/pagos`, {
         method: 'POST',
@@ -185,7 +190,7 @@ export default function Inicio() {
       await cargarDatos();
     } catch (e) {
       console.error('Error al registrar pago:', e);
-      setMensaje({ tipo: 'error', texto: e.message });
+      setErrorPago(e.message);
     }
   };
 
@@ -361,7 +366,10 @@ export default function Inicio() {
                                   size="small"
                                   variant="outlined"
                                   onClick={() => abrirPago(c)}
-                                  disabled={c.estado === 'INASISTENCIA' || c.estado === 'CANCELADA' || Boolean(c.pago)}
+                                  disabled={
+                                    !['CONFIRMADA', 'ATENDIDA'].includes(c.estado) ||
+                                    Boolean(c.pago)
+                                  }
                                 >
                                   Registrar pago
                                 </Button>
@@ -387,6 +395,7 @@ export default function Inicio() {
         <DialogContent>
           {modalPago && (
             <Stack spacing={2} sx={{ pt: 1 }}>
+              {errorPago && <Alert severity="error">{errorPago}</Alert>}
               <Typography>
                 {nombreCompleto(modalPago.paciente)} · {modalPago.servicio?.nombre}
               </Typography>
@@ -416,15 +425,19 @@ export default function Inicio() {
               {facturacion && (
                 <>
                   <TextField
+                    required
                     label="Nombre de facturación"
                     value={nombreFacturacion}
+                    inputProps={{ maxLength: 50 }}
                     onChange={(e) => setNombreFacturacion(e.target.value)}
                     fullWidth
                   />
                   <TextField
+                    required
                     label="Correo de facturación"
                     type="email"
                     value={correoFacturacion}
+                    inputProps={{ maxLength: 60 }}
                     onChange={(e) => setCorreoFacturacion(e.target.value)}
                     fullWidth
                   />

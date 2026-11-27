@@ -8,6 +8,7 @@ import serviciosRoutes from './routes/servicios.routes';
 import slotsRoutes from './routes/slots.routes';
 import citasRoutes from "./routes/citas.routes";
 import pagosRoutes from "./routes/pagos.routes";
+import multasRoutes from './routes/multas.routes';
 import { isRecord } from './utils/requestValidation';
 
 const app = express();
@@ -34,6 +35,7 @@ app.use('/api/servicios', serviciosRoutes);
 app.use('/api/slots', slotsRoutes);
 app.use('/api/citas', citasRoutes);
 app.use('/api/pagos', pagosRoutes);
+app.use('/api/multas', multasRoutes);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (

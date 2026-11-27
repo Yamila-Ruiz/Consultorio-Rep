@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/utils/requestValidation.test.ts",
+    "test": "tsx --test src/utils/requestValidation.test.ts src/utils/nombreUsuario.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts"
   },

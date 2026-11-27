@@ -31,7 +31,8 @@ export default function Facturacion() {
       .then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'No se pudieron consultar las facturas');
-        setPagos(d.filter((p) => p.facturacion));
+        if (!Array.isArray(d)) throw new Error('El servidor devolvió una lista de pagos inválida.');
+        setPagos(d.filter((p) => p.requiereFactura === true));
       })
       .catch((e) => setError(e.message));
   }, []);

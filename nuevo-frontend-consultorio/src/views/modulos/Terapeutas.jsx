@@ -177,6 +177,7 @@ export default function Terapeutas() {
     nombre: '',
     aPaterno: '',
     aMaterno: '',
+    nombreUsuario: '',
     contactoTelefonico: '',
     especialidad: '',
     contrasena: ''
@@ -252,6 +253,7 @@ export default function Terapeutas() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rol: 'terapeuta',
+          nombreUsuario: formTerapeuta.nombreUsuario.trim().toUpperCase(),
           nombre: formTerapeuta.nombre.trim().toUpperCase(),
           aPaterno: formTerapeuta.aPaterno.trim().toUpperCase(),
           aMaterno: formTerapeuta.aMaterno.trim().toUpperCase(),
@@ -269,13 +271,14 @@ export default function Terapeutas() {
 
       setMensaje({
         tipo: 'success',
-        texto: `Terapeuta registrado correctamente. Usuario generado: ${data.nombreUsuario}`
+        texto: `Terapeuta registrado correctamente. Usuario de acceso: ${data.nombreUsuario}`
       });
       setOpenRegistro(false);
       setFormTerapeuta({
         nombre: '',
         aPaterno: '',
         aMaterno: '',
+        nombreUsuario: '',
         contactoTelefonico: '',
         especialidad: '',
         contrasena: ''
@@ -939,6 +942,17 @@ export default function Terapeutas() {
                   inputProps={{ maxLength: 60 }}
                   value={formTerapeuta.aMaterno}
                   onChange={(e) => setFormTerapeuta({ ...formTerapeuta, aMaterno: e.target.value.toUpperCase() })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  required
+                  label="Usuario de acceso"
+                  inputProps={{ maxLength: 50 }}
+                  value={formTerapeuta.nombreUsuario}
+                  onChange={(e) => setFormTerapeuta({ ...formTerapeuta, nombreUsuario: e.target.value })}
+                  helperText="Debe ser único; puede usar letras, números y espacios."
                 />
               </Grid>
               <Grid item xs={12} sm={6}>

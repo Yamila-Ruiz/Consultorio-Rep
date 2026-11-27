@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
-import { isPositiveInteger, parsePathId } from '../utils/requestValidation';
+import { isAssignedTherapist, isPositiveInteger, parsePathId } from '../utils/requestValidation';
 
 const MONTO_MULTA_INASISTENCIA = 200;
 const ESTADOS_CITA = ['AGENDADA', 'CONFIRMADA', 'ATENDIDA', 'CANCELADA', 'INASISTENCIA'] as const;
@@ -56,7 +56,7 @@ export const createCita = async (req: Request, res: Response) => {
             if (!slot.estado) throw new Error('SLOT_OCUPADO');
             const terapeuta = await tx.terapeuta.findUnique({ where: { idTerapeuta: slot.idTerapeuta } });
             if (!terapeuta || !terapeuta.activo) throw new Error('TERAPEUTA_INACTIVO');
-            if (Number(paciente.idTerapeuta) !== Number(slot.idTerapeuta)) throw new Error('TERAPEUTA_NO_ASIGNADO');
+            if (!isAssignedTherapist(paciente.idTerapeuta, slot.idTerapeuta)) throw new Error('TERAPEUTA_NO_ASIGNADO');
 
             const duplicada = await tx.cita.findFirst({
                 where: { idPaciente: pacienteId, estado: { not: 'CANCELADA' }, slotdisponibilidad: { fecha: slot.fecha, inicio: slot.inicio } }

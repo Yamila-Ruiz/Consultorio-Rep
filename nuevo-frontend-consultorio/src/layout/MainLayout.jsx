@@ -30,6 +30,7 @@ import {
   IconHome,
   IconLogout,
   IconMenu2,
+  IconAlertTriangle,
   IconUserCheck,
   IconUsers
 } from '@tabler/icons-react';
@@ -43,6 +44,7 @@ const menuItems = [
   { title: 'Pacientes', url: '/pacientes', icon: IconUsers },
   { title: 'Servicios', url: '/servicios', icon: IconHeartbeat },
   { title: 'Pagos', url: '/pagos', icon: IconCash },
+  { title: 'Multas', url: '/multas', icon: IconAlertTriangle },
   { title: 'Facturación', url: '/facturacion', icon: IconFileInvoice },
   { title: 'Terapeutas', url: '/terapeutas', icon: IconUserCheck }
 ];

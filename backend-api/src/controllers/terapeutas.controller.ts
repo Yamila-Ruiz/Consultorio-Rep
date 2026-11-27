@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 import { isNonEmptyString, isPositiveInteger, isOptionalString, parsePathId } from '../utils/requestValidation';
+import { generarNombreUsuarioDisponible } from '../utils/nombreUsuario';
 
 export const getTerapeutas = async (req: Request, res: Response) => {
     try {
@@ -54,15 +55,11 @@ export const createTerapeuta = async (req: Request, res: Response) => {
 
             if (!usuarioIdFinal) {
                 const primerNombreMayus = nombre.trim().split(/\s+/)[0].toUpperCase();
-                const nombreUsuarioGenerado = `TERAPEUTA ${primerNombreMayus}`;
-
-                const existente = await tx.usuario.findFirst({
-                    where: { nombreUsuario: nombreUsuarioGenerado }
-                });
-
-                if (existente) {
-                    throw new Error('USUARIO_DUPLICADO');
-                }
+                const nombreUsuarioGenerado = await generarNombreUsuarioDisponible(
+                    `TERAPEUTA ${primerNombreMayus}`,
+                    async (nombreUsuario) =>
+                        (await tx.usuario.findFirst({ where: { nombreUsuario } })) !== null
+                );
 
                 const usuarioCreado = await tx.usuario.create({
                     data: {
@@ -91,10 +88,6 @@ export const createTerapeuta = async (req: Request, res: Response) => {
 
         res.status(201).json(nuevoTerapeuta);
     } catch (error: unknown) {
-        if (error instanceof Error && error.message === 'USUARIO_DUPLICADO') {
-            res.status(409).json({ error: 'Ya existe un usuario con ese rol y primer nombre.' });
-            return;
-        }
         if (error instanceof Error && error.message === 'USUARIO_NO_EXISTE') {
             res.status(400).json({ error: 'El usuario seleccionado no existe.' });
             return;

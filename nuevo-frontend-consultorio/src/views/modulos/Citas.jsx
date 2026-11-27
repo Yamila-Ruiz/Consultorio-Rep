@@ -535,14 +535,14 @@ export default function Citas() {
                   {esHoy && <Chip label="HOY" size="small" color="primary" sx={{ height: 18, fontSize: '0.65rem' }} />}
                 </Stack>
 
-                {/* Bloques de citas del día: SOLO muestran fecha y nombre del paciente */}
+                {/* El día ya está indicado por la posición del evento en el calendario. */}
                 <Stack spacing={0.5}>
                   {citasDelDia.map((c) => {
                     const idTer = Number(c.slotdisponibilidad?.idTerapeuta);
                     const color = coloresPorTerapeuta[idTer] || PALETA_TERAPEUTAS[0];
-                    const fechaCita = c.slotdisponibilidad?.fecha?.split('T')[0] || '';
                     const nombrePaciente = formatearNombre(c.paciente);
                     const horaInicio = c.slotdisponibilidad?.inicio?.split('T')[1]?.slice(0, 5) || '';
+                    const horaFin = c.slotdisponibilidad?.fin?.split('T')[1]?.slice(0, 5) || '';
                     const nombreTerapeuta = formatearNombre(c.slotdisponibilidad?.terapeuta);
 
                     return (
@@ -558,7 +558,7 @@ export default function Citas() {
                           }}
                         >
                           <Typography variant="caption" display="block" sx={{ fontWeight: 700, lineHeight: 1.15, fontSize: '0.68rem' }}>
-                            {fechaCita}
+                            {horaInicio && horaFin ? `${horaInicio} - ${horaFin}` : horaInicio || 'Hora no disponible'}
                           </Typography>
                           <Typography
                             variant="caption"
